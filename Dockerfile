@@ -7,6 +7,8 @@ WORKDIR /web
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ ./
+# Serve the offline demo at /finn-demo.html (add ?download=1 to save it).
+COPY demo/finn-demo.html public/finn-demo.html
 # Empty base URL => browser calls same-origin /api/v1, proxied to FastAPI.
 ENV NEXT_PUBLIC_API_BASE_URL="" \
     BACKEND_INTERNAL_URL="http://127.0.0.1:8000" \
