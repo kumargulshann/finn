@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // Docker deploy sets NEXT_OUTPUT=standalone to get a self-contained server.js.
+  ...(process.env.NEXT_OUTPUT === "standalone" ? { output: "standalone" as const } : {}),
   cacheComponents: true,
   partialPrefetching: true,
   async rewrites() {

@@ -1,0 +1,11 @@
+# Render Blueprint — one free Docker web service serving UI + API.
+services:
+  - type: web
+    name: finn
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/v1/alert-rules
+    envVars:
+      - key: PORT
+        value: "10000"

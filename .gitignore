@@ -80,3 +80,6 @@ Desktop.ini
 *.swo
 
 cloudflared.exe
+
+# Seed snapshot shipped with the deploy image (pre-indexed filings)
+!backend/seed/finn.db

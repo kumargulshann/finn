@@ -6,8 +6,26 @@
 
 FINN is an AI-powered, mobile-first financial intelligence assistant for Indian equities (NSE/BSE). Designed for professional analysts and portfolio managers, FINN unifies two fundamental investment research paradigms into a cohesive workflow:
 
-1. **PUSH (Proactive Monitoring):** Monitors portfolio companies for material corporate announcements, financial results, and unusual price/volume action. Prioritizes alerts by potential financial impact, computes YoY/QoQ result comparisons, surfaces strategic context ("Why it matters"), eliminates duplicate filings across exchanges, and supports user-configurable sensitivity thresholds.
+1. **PUSH (Proactive Monitoring):** Monitors portfolio companies for material corporate announcements, financial results, and unusual price/volume action. Prioritizes alerts by potential financial impact, computes YoY result comparisons, surfaces strategic context ("Why it matters"), eliminates duplicate filings across exchanges, and supports user-configurable sensitivity thresholds.
 2. **PULL (Grounded On-Demand Research):** Enables deep research on any NSE-listed company using official annual reports and earnings-call transcripts. Features 6 specialized research lenses, natural-language question answering grounded in primary sources, page-level citations (`#page=X`), trajectory shift detection, strict banking guidance domain policies, and a 4-quarter Guidance vs Actual worked comparison.
+
+## Submission at a glance
+
+| Deliverable | Where |
+| :--- | :--- |
+| 📱 Live prototype (open on a phone) | **{{LIVE_URL}}** — free tier sleeps when idle; first load can take ~1 min |
+| 💻 Repository | https://github.com/kumargulshann/finn |
+| 🤖 AI build history | [`build-history/`](build-history/README.md) — 6 sessions across Antigravity, Codex and Claude Code, including abandoned attempts |
+| ✉️ Writeup | [`SUBMISSION.md`](SUBMISSION.md) — what I built, trade-offs, what I left out, what's next |
+
+**60-second phone tour:** *Today* → tap the Bharti Airtel results card → back → *Settings*, raise volume threshold to 2.5× → *Today* (Reliance alert disappears) → *Research* → Infosys → **Guidance vs Actual** → tap any page citation.
+
+### Deploying
+
+The repo ships a single [`Dockerfile`](Dockerfile): Next.js (standalone) serves the UI on `$PORT` and proxies `/api/v1/*` to FastAPI on loopback. On first boot, a pre-indexed SQLite snapshot ([`backend/seed/finn.db`](backend/seed/finn.db): 14 filings, ~6.5k page chunks) is copied in, so research works even if NSE blocks the host's IP.
+
+- **Render:** New → Blueprint → pick this repo ([`render.yaml`](render.yaml) is picked up automatically).
+- **Hugging Face Spaces / Fly / Railway / any Docker host:** build the Dockerfile; it listens on `$PORT` (default 7860).
 
 ---
 
