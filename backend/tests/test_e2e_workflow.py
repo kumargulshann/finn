@@ -49,67 +49,27 @@ def test_full_push_and_pull_e2e(tmp_path) -> None:
         # 1. PUSH WORKFLOW
         # =========================================================================
         
-        # 1.1 Portfolio summary & holdings
+        # 1.1 Portfolio summary & holdings (18 holdings, one batched quote request)
         portfolio_res = client.get("/api/v1/portfolio")
         assert portfolio_res.status_code == 200
         pdata = portfolio_res.json()
-        assert pdata["summary"]["companies_tracked"] == 8
-        assert pdata["is_demo"] is True
-        assert len(pdata["holdings"]) == 8
+        assert pdata["summary"]["companies_tracked"] == 18
+        assert len(pdata["holdings"]) == 18
         first_holding = pdata["holdings"][0]
         assert first_holding["price"] is not None
         assert first_holding["market_data"]["status"] in {"fresh", "cached"}
-        # Truthful valuation check: no share quantities
-        assert pdata["summary"]["portfolio_value"] is None
+        assert pdata["summary"]["portfolio_value"] is None  # weights only, no invented quantities
+        assert pdata["thresholds"] == {"volume_multiple": 2.0, "move_pct": 4.0}
 
-        # 1.2 Today digest & prioritization
-        digest_res = client.get("/api/v1/digest?period=24%20hours")
-        assert digest_res.status_code == 200
-        ddata = digest_res.json()
-        assert ddata["count"] == 3
-        alerts = ddata["items"]
-        
-        # Priority check: High impact financial results must be ranked first
-        assert alerts[0]["impact"] == "High"
-        assert alerts[0]["type"] == "Earnings"
-        assert alerts[0]["priority_score"] >= alerts[1]["priority_score"]
-        assert alerts[1]["priority_score"] >= alerts[2]["priority_score"]
+        # 1.2 Today digest: no fabricated sample events; the synthetic history has no unusual moves.
+        ddata = client.get("/api/v1/digest?period=24%20hours").json()
+        assert ddata["count"] == 0 and ddata["is_demo"] is False
+        for period in ("7 days", "30 days"):
+            assert client.get("/api/v1/digest", params={"period": period}).json()["period"] == period
 
-        # 1.3 Alert Detail & Bookmarking
-        top_id = alerts[0]["id"]
-        detail_res = client.get(f"/api/v1/events/{top_id}")
-        assert detail_res.status_code == 200
-        detail = detail_res.json()
-        assert detail["why"]
-        assert len(detail["details"]) >= 3
-        assert detail["source"]
-        assert detail["sourceName"]
-        assert detail["is_saved"] is False
-
-        # Bookmark alert
-        patch_res = client.patch(f"/api/v1/events/{top_id}?is_saved=true")
-        assert patch_res.status_code == 200
-        assert patch_res.json()["is_saved"] is True
-        assert client.get(f"/api/v1/events/{top_id}").json()["is_saved"] is True
-
-        # 1.4 Configurable Alert Thresholds in Settings
-        rules_res = client.get("/api/v1/alert-rules")
-        assert rules_res.status_code == 200
-        rules = rules_res.json()["items"]
+        rules = client.get("/api/v1/alert-rules").json()["items"]
         price_rule = next(r for r in rules if r["category"] == "Price move")
         assert price_rule["threshold"] == 2.0
-
-        # Change threshold from 2.0 to 3.0 (higher than Reliance's 2.4x volume surge)
-        client.patch(f"/api/v1/alert-rules/{price_rule['id']}?threshold=3.0")
-        digest_higher = client.get("/api/v1/digest?period=24%20hours").json()
-        assert digest_higher["count"] == 2
-        assert "RELIANCE" not in [i["symbol"] for i in digest_higher["items"]]
-
-        # Restore threshold to 1.5 -> Reliance alert re-appears
-        client.patch(f"/api/v1/alert-rules/{price_rule['id']}?threshold=1.5")
-        digest_restored = client.get("/api/v1/digest?period=24%20hours").json()
-        assert digest_restored["count"] == 3
-        assert "RELIANCE" in [i["symbol"] for i in digest_restored["items"]]
 
         # 1.5 Deduplication with Real Ingestion
         now = datetime.now(timezone.utc)
@@ -140,6 +100,11 @@ def test_full_push_and_pull_e2e(tmp_path) -> None:
         assert refresh_res.status_code == 200
         assert refresh_res.json()["inserted"] == 1
         assert refresh_res.json()["duplicates"] == 1
+        top = client.get("/api/v1/digest?period=24%20hours").json()["items"][0]
+        assert top["symbol"] == "BHARTIARTL" and top["type"] == "Results" and top["impact"] == "High"
+        detail = client.get(f"/api/v1/events/{top['id']}").json()
+        assert detail["why"] and detail["source"] and detail["sourceName"]
+        assert client.patch(f"/api/v1/events/{top['id']}?is_saved=true").json()["is_saved"] is True
 
         # =========================================================================
         # 2. PULL WORKFLOW
@@ -153,7 +118,7 @@ def test_full_push_and_pull_e2e(tmp_path) -> None:
         assert infy["in_portfolio"] is True
 
         # Non-portfolio companies
-        for sym, name in [("SBIN", "State Bank of India"), ("SUNPHARMA", "Sun Pharmaceutical"), ("HINDUNILVR", "Hindustan Unilever")]:
+        for sym, name in [("SBIN", "State Bank of India"), ("TATASTEEL", "Tata Steel"), ("HINDUNILVR", "Hindustan Unilever")]:
             search_items = client.get(f"/api/v1/companies?q={sym}").json()["items"]
             assert any(c["symbol"] == sym for c in search_items)
             match = next(c for c in search_items if c["symbol"] == sym)
@@ -173,7 +138,7 @@ def test_full_push_and_pull_e2e(tmp_path) -> None:
         assert infy_info["market_data"]["volume"] is not None
 
         infy_prices = client.get(f"/api/v1/companies/{infy['id']}/prices?period=5d").json()
-        assert len(infy_prices["items"]) == 5
+        assert len(infy_prices["items"]) >= 5
 
         # 2.3 Unindexed company handling (Zero hallucination policy)
         sbin_id = next(c["id"] for c in client.get("/api/v1/companies?q=SBIN").json()["items"] if c["symbol"] == "SBIN")
@@ -314,11 +279,11 @@ def test_full_push_and_pull_e2e(tmp_path) -> None:
         # 3. SETTINGS WORKFLOW
         # =========================================================================
         # 3.1 Toggle portfolio holding
-        assert client.put("/api/v1/portfolio/holdings/ASIANPAINT?enabled=true").status_code == 200
-        assert client.get("/api/v1/portfolio").json()["summary"]["companies_tracked"] == 9
-
         assert client.put("/api/v1/portfolio/holdings/ASIANPAINT?enabled=false").status_code == 200
-        assert client.get("/api/v1/portfolio").json()["summary"]["companies_tracked"] == 8
+        assert client.get("/api/v1/portfolio").json()["summary"]["companies_tracked"] == 17
+
+        assert client.put("/api/v1/portfolio/holdings/ASIANPAINT?enabled=true").status_code == 200
+        assert client.get("/api/v1/portfolio").json()["summary"]["companies_tracked"] == 18
 
         # 3.2 Category toggle
         assert client.patch(f"/api/v1/alert-rules/{price_rule['id']}?enabled=false").status_code == 200

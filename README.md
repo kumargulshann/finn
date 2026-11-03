@@ -6,7 +6,7 @@
 
 FINN is an AI-powered, mobile-first financial intelligence assistant for Indian equities (NSE/BSE). Designed for professional analysts and portfolio managers, FINN unifies two fundamental investment research paradigms into a cohesive workflow:
 
-1. **PUSH (Proactive Monitoring):** Monitors portfolio companies for material corporate announcements, financial results, and unusual price/volume action. Prioritizes alerts by potential financial impact, computes YoY result comparisons, surfaces strategic context ("Why it matters"), eliminates duplicate filings across exchanges, and supports user-configurable sensitivity thresholds.
+1. **PUSH (Proactive Monitoring):** Watches an 18-stock portfolio (13 sectors, large to small cap) using live NSE filings and end-of-day prices. It classifies every filing with the reference taxonomy and collapses routine ones. It reads results PDFs into a QoQ/YoY first cut (Revenue, EBITDA, PBT, PAT) and pulls the disclosed profile of incoming or outgoing executives. It fires triggered alerts when volume or the daily move crosses thresholds you set. Duplicate NSE/BSE filings are merged.
 2. **PULL (Grounded On-Demand Research):** Enables deep research on any NSE-listed company using official annual reports and earnings-call transcripts. Features 6 specialized research lenses, natural-language question answering grounded in primary sources, page-level citations (`#page=X`), trajectory shift detection, strict banking guidance domain policies, and a 4-quarter Guidance vs Actual worked comparison.
 
 ## Submission at a glance
@@ -18,7 +18,7 @@ FINN is an AI-powered, mobile-first financial intelligence assistant for Indian 
 | 🤖 AI build history | [`build-history/`](build-history/README.md) — 6 sessions across Antigravity, Codex and Claude Code, including abandoned attempts |
 | ✉️ Writeup | [`SUBMISSION.md`](SUBMISSION.md) — what I built, trade-offs, what I left out, what's next |
 
-**60-second phone tour:** *Today* → tap the Bharti Airtel results card → back → *Settings*, raise volume threshold to 2.5× → *Today* (Reliance alert disappears) → *Research* → Infosys → **Guidance vs Actual** → tap any page citation.
+**60-second phone tour:** *Today* → tap **30d** → open a **Results** card (QoQ/YoY table read from the filing, with its page) → back → open a **Management changes** card (profile from the filing) → *Settings*, raise *Unusual volume* to 3.0× → *Today* (weaker triggers drop out) → *Research* → Infosys → **Guidance vs Actual** → tap any page citation.
 
 ### Deploying
 
@@ -186,7 +186,7 @@ npm run dev
 To run all automated verification checks across backend and frontend:
 
 ```powershell
-# 1. Run all Backend Pytest Suites (12 tests)
+# 1. Run all Backend Pytest Suites (13 tests)
 Set-Location backend
 .\.venv\Scripts\Activate.ps1
 pytest -v
@@ -199,7 +199,7 @@ npm run build
 ```
 
 **Test Coverage Summary:**
-- `test_core_api.py`: Validates portfolio readings, cached market data, alert rule persistence, deduplication, unindexed company data handling, and company coverage outside demo portfolio.
+- `test_core_api.py`: Covers the 18-holding portfolio with one batched quote request, EOD triggers and threshold re-filtering, and holdings edits surviving restarts. It also runs results-PDF parsing (QoQ/YoY, EBITDA, page) and executive-profile extraction on generated PDFs, plus classification, routine collapsing, NSE/BSE dedup, research retrieval and coverage outside the portfolio.
 - `test_e2e_workflow.py`: Comprehensive end-to-end integration test validating the complete PUSH and PULL user journeys, alert priority scoring, threshold filtering, multi-quarter Guidance vs Actual matching, and banking guidance domain policies.
 - `test_health.py`: Validates service availability and database connectivity.
 
@@ -219,7 +219,7 @@ All endpoints are versioned under `/api/v1` (except `/health`):
 | `PATCH`| `/api/v1/events/{id}` | Toggle bookmark (`is_saved`) or read (`is_read`) status for an event. |
 | `GET` | `/api/v1/alert-rules` | List alert categories, enabled states, and sensitivity thresholds. |
 | `PATCH`| `/api/v1/alert-rules/{id}` | Update alert rule sensitivity (e.g. volume spike threshold multiplier) or enabled state. |
-| `POST` | `/api/v1/announcements/refresh` | Ingest recent NSE/BSE corporate announcements, classify categories, and deduplicate. |
+| `POST` | `/api/v1/announcements/refresh` | Ingest NSE/BSE filings for the portfolio, classify, deduplicate, and parse results / management-change PDFs (runs every 4h in Docker). |
 | `GET` | `/api/v1/companies` | Search company universe by symbol prefix, name substring, or conversational alias. |
 | `GET` | `/api/v1/companies/{id}` | Get detailed company profile, exchange instruments, filing count, and live quote. |
 | `GET` | `/api/v1/companies/{id}/prices` | Get cached daily OHLCV historical bars (`5d`, `1mo`, `3mo`, `6mo`, `1y`, `2y`). |
@@ -234,24 +234,19 @@ All endpoints are versioned under `/api/v1` (except `/health`):
 
 Follow these scenarios in the web UI at `http://localhost:3000` to review FINN's core capabilities:
 
-### Scenario 1: PUSH — Proactive Portfolio Digest & Priority Triage
-1. Open `http://localhost:3000` on desktop or in mobile emulation (390px width).
-2. Note the **Market Pulse** ticker showing live EOD prices and daily moves for tracked holdings.
-3. Review the **What Matters Today** digest. The top alert is Bharti Airtel's Q2 results, ranked first with a `High` impact badge because of its financial magnitude (Revenue +12.6% YoY, EBITDA +14.9% YoY, PAT +89.1% YoY).
-4. Click on the Bharti Airtel alert card to open **Alert Detail** (`/events/quarterly-results`):
-   - Review the strategic **"Why it matters"** breakdown explaining operating leverage and ARPU expansion.
-   - Review the **Event facts** table with YoY percentages.
-   - Click the **Source document** card to open the official filing attachment.
-   - Click **Save** in the top-right header to bookmark the alert.
+### Scenario 1: PUSH — the digest
+1. Open the app on a phone (or at 390px). **Today** opens on the 24h window; switch between **24h / 7d / 30d**.
+2. **What matters** lists only material items, ranked by event type, financial magnitude (e.g. how big the PAT surprise is), portfolio weight and recency. Routine filings (earnings-call notices, investor meets, dividends, newspaper ads, compliance certificates) are counted and collapsed at the bottom; tap to expand.
+3. Switch to **30d** and open a **Results** card, e.g. Reliance, L&T, TCS, Asian Paints, ITC, NTPC or Sun Pharma:
+   - The card shows Revenue and PAT **QoQ and YoY** chips.
+   - The detail page has the **first-cut table**: Revenue, EBITDA (derived), PBT and PAT for this quarter, last quarter and a year ago. It is read from the results table in the filing PDF, with a link to the exact page.
+   - Columns are matched to periods by their header dates and cross-checked against the total-income line. If a filing can't be verified (Maruti, Dixon, banks and NBFCs), FINN says so instead of showing numbers.
+4. Open a **Management changes** card (e.g. NTPC, Dixon, UltraTech, Bajaj Finance). **Who is it?** shows the incoming or outgoing person's profile as disclosed in the filing (SEBI requires one), with its page and a LinkedIn search link. FINN does not write bios from memory.
 
-### Scenario 2: PUSH — Configurable Alert Sensitivity & Thresholds
-1. From the navigation bar, click **Settings** (`/settings`).
-2. Under **Signal Sensitivity**, locate the *Unusual Trading Volume* rule.
-3. Note that the threshold is currently set to `2.0× average`.
-4. Switch the threshold dropdown to `2.5× average` or `3.0× average`.
-5. Return to the **Today** screen:
-   - Notice that Reliance's volume alert (2.4× volume move) is now filtered out of the 24-hour digest because it falls below the new 2.5× sensitivity threshold.
-6. Return to Settings, set the threshold back to `1.5×` or `2.0×`, and verify that the Reliance alert immediately reappears.
+### Scenario 2: PUSH — triggered alerts you control
+1. The **EOD monitor** (right column on desktop, below the digest on a phone) shows every holding's last move and its volume as a multiple of the 20-day average. Highlighted rows have crossed your thresholds.
+2. Each **Price move** alert says whether the company filed anything that session ("no disclosed catalyst" vs a link to the same-day filing).
+3. Open **Settings → Triggers**. Raise *Unusual volume* from 2.0× to 3.0× and *Large daily move* from 4% to 7%, then go back to **Today**: weaker triggers disappear immediately. Lower them again and they come back. Category toggles (Results, M&A, Management changes…) filter the digest the same way.
 
 ### Scenario 3: PULL — 4-Quarter Guidance vs Actual Analysis (Worked Example)
 1. Navigate to **Research** (`/research`).
@@ -304,3 +299,6 @@ Follow these scenarios in the web UI at `http://localhost:3000` to review FINN's
 2. **BSE Scraping Restrictions:** Automated scrapers querying public BSE feeds frequently encounter HTTP 403 blocks (bot protection). NSE feeds ingest cleanly; for enterprise production, a contracted exchange feed (e.g., BSE Direct Feed / NSE SFTP) is recommended.
 3. **Scanned / Raster PDFs:** Scanned PDFs lacking an embedded text layer (such as older Bharti Airtel annual reports) are detected and flagged as unreadable. FINN refuses to invent text for image-only pages; OCR preprocessing (e.g., Tesseract) would be required to extract them.
 4. **Extractive Retrieval vs Generative LLM:** Research QA currently uses deterministic lexical extraction (BM25) with structured heuristic synthesis to guarantee 100% auditable grounding without hallucination. The backend is designed with a provider-neutral interface ready for direct connection to an LLM (e.g. Gemini 1.5 Pro) for natural language rephrasing.
+5. **Results parsing coverage:** The first-cut parser handles the standard SEBI results table. In the live 30-day sample it verified 8 of 13 non-bank results filings. Banks and NBFCs (interest earned / provisions format) and unusual layouts (e.g. Maruti, Dixon) are marked "not available" with the reason, and the filing link stays one tap away.
+6. **Executive profiles come only from the filing:** When a disclosure carries no profile, FINN names the person and offers a LinkedIn *search link*. It never scrapes LinkedIn or writes a bio from model memory.
+7. **Push is in-app:** Triggers are evaluated on end-of-day data whenever Today loads, and filings refresh every 4 hours in the deployed container. There are no phone notifications yet.

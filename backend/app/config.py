@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./data/finn.db"
     frontend_origin: str = "http://localhost:3000"
     market_cache_ttl_seconds: int = 900
+    auto_refresh_hours: float = 0  # >0 starts a background NSE filings refresh loop (enabled in Docker)
 
     model_config = SettingsConfigDict(
         env_prefix="FINN_",

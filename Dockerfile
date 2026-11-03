@@ -35,6 +35,7 @@ USER finn
 ENV FINN_ENV=production \
     FINN_DATABASE_URL=sqlite:////app/backend/data/finn.db \
     FINN_FRONTEND_ORIGIN=* \
+    FINN_AUTO_REFRESH_HOURS=4 \
     PORT=7860
 EXPOSE 7860
 CMD ["/app/start.sh"]

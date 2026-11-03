@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from threading import Lock
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.domain.models import DailyPrice, Instrument, MarketSnapshot, utc_now
@@ -19,6 +19,48 @@ class MarketDataService:
         self.cache_ttl = timedelta(seconds=max(30, cache_ttl_seconds))
         self._lock_guard = Lock()
         self._instrument_locks: dict[int, Lock] = {}
+
+    def refresh_many(self, session: Session, instruments: list[Instrument], period: str = "3mo") -> None:
+        """Warm snapshots + daily bars for many instruments in one batched request when stale.
+
+        Pulls ~3 months so EOD triggers have a 20-day volume baseline. Falls back to per-ticker
+        history when the provider has no batch API. Failures leave existing cache untouched.
+        """
+        now = utc_now()
+        stale = []
+        for instrument in instruments:
+            snapshot = session.get(MarketSnapshot, instrument.id)
+            bars = session.scalar(select(func.count(DailyPrice.id)).where(DailyPrice.instrument_id == instrument.id)) or 0
+            if not snapshot or snapshot.close is None or _aware(snapshot.fetched_at) + self.cache_ttl <= now or bars < 25:
+                stale.append(instrument)
+        if not stale:
+            return
+        symbols = {(i.provider_symbol or f"{i.symbol}.NS"): i for i in stale}
+        try:
+            if hasattr(self.provider, "fetch_many"):
+                fetched = self.provider.fetch_many(list(symbols), period)
+            else:
+                fetched = {sym: self.provider.fetch_history(sym, period) for sym in symbols}
+        except Exception:
+            session.rollback()
+            return
+        for sym, bars in fetched.items():
+            instrument = symbols.get(sym)
+            if not instrument or not bars:
+                continue
+            bars.sort(key=lambda bar: bar["date"])
+            self._save_bars(session, instrument.id, bars)
+            latest, previous = bars[-1], (bars[-2] if len(bars) > 1 else None)
+            snapshot = session.get(MarketSnapshot, instrument.id) or MarketSnapshot(instrument_id=instrument.id)
+            session.add(snapshot)
+            snapshot.close = latest["close"]
+            snapshot.previous_close = previous["close"] if previous else None
+            snapshot.change_percent = ((latest["close"] / previous["close"]) - 1) * 100 if previous and previous["close"] else None
+            snapshot.volume = latest.get("volume")
+            snapshot.market_as_of = _aware(latest["date"])
+            snapshot.fetched_at = now
+            snapshot.error_message = None
+        session.commit()
 
     def quote(self, session: Session, instrument: Instrument) -> dict[str, Any]:
         with self._lock_guard:

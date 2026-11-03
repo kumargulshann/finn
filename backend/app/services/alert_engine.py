@@ -31,33 +31,39 @@ def extract_alert_metrics(text: str) -> dict[str, float]:
     return metrics
 
 
+def enrichment_of(event: Announcement) -> dict[str, Any]:
+    try:
+        return json.loads(event.enrichment_json) if event.enrichment_json else {}
+    except (TypeError, ValueError):
+        return {}
+
+
 def should_include_alert(
     event: Announcement,
     rules_by_category: dict[str, AlertRule],
     facts: list[str] | None = None,
 ) -> tuple[bool, str | None]:
-    """Verify if the alert's category is enabled and its metrics satisfy configured thresholds."""
+    """Apply the user's category toggles and thresholds.
+
+    EOD "Price move" events pass if *either* enabled rule fires: volume ≥ N× its 20-day average
+    ("Price move" rule) or |daily move| ≥ N% ("Price change" rule).
+    """
+    if event.category == "Price move":
+        data = enrichment_of(event)
+        vm, mv = data.get("volume_multiple"), data.get("change_pct")
+        if not data:  # legacy rows without structured metrics
+            metrics = extract_alert_metrics(f"{event.title} {event.summary} {' '.join(facts or [])}")
+            vm, mv = metrics.get("volume_multiple"), metrics.get("price_change_pct")
+        vol_rule, move_rule = rules_by_category.get("Price move"), rules_by_category.get("Price change")
+        vol_hit = bool(vol_rule and vol_rule.enabled and vm is not None and vm >= (vol_rule.threshold or 2.0))
+        move_hit = bool(move_rule and move_rule.enabled and mv is not None and abs(mv) >= (move_rule.threshold or 4.0))
+        if vol_hit or move_hit:
+            return True, None
+        return False, "Below your volume / price-move thresholds"
+
     rule = rules_by_category.get(event.category)
     if not rule or not rule.enabled:
         return False, f"Category '{event.category}' is disabled by user alert preferences"
-
-    if rule.threshold is not None:
-        combined_text = f"{event.title} {event.summary} {' '.join(facts or [])}"
-        metrics = extract_alert_metrics(combined_text)
-
-        if event.category == "Price move":
-            vol = metrics.get("volume_multiple")
-            if vol is not None:
-                if vol < rule.threshold:
-                    return False, f"Volume multiple {vol:.1f}x is below user configured threshold {rule.threshold:.1f}x"
-                return True, None
-
-            price_pct = metrics.get("price_change_pct")
-            if price_pct is not None:
-                if abs(price_pct) < rule.threshold:
-                    return False, f"Price change {price_pct:+.1f}% is below user configured threshold {rule.threshold:.1f}%"
-                return True, None
-
     return True, None
 
 
@@ -92,30 +98,41 @@ def calculate_priority_score(
         "Earnings": 40.0,
         "Acquisitions": 35.0,
         "Regulatory updates": 30.0,
-        "Price move": 30.0,
+        "Price move": 18.0,
         "Order wins": 25.0,
         "Fundraising": 25.0,
         "Management changes": 20.0,
         "Corporate actions": 15.0,
         "Corporate action": 15.0,
-        "Macro": 10.0,
+        "Capex": 22.0,
+        "Credit rating": 22.0,
+        "Pledging": 22.0,
+        "Insider trading": 12.0,
+        "Earnings call": 5.0,
+        "Investor meetings": 5.0,
+        "Routine": 0.0,
     }
     score += category_weights.get(event.category, 15.0)
 
-    # 3. Market Movement Magnitude
-    if market_data:
+    # 3. Market Movement Magnitude (today's tape adds urgency to material filings, not routine ones)
+    if market_data and event.category not in ("Routine", "Earnings call", "Investor meetings", "Price move"):
         change_pct = market_data.get("change_percent")
         if change_pct is not None:
             abs_change = abs(change_pct)
-            score += min(abs_change * 5.0, 25.0)
-            if abs_change >= 3.0:
-                score += 10.0
+            score += min(abs_change * 3.0, 15.0)
 
     if event.category == "Price move":
-        metrics = extract_alert_metrics(f"{event.title} {event.summary}")
-        vol = metrics.get("volume_multiple")
+        data = enrichment_of(event)
+        vol = data.get("volume_multiple") or extract_alert_metrics(f"{event.title} {event.summary}").get("volume_multiple")
         if vol:
-            score += min(vol * 8.0, 30.0)
+            score += min(vol * 6.0, 25.0)
+        move = data.get("change_pct")
+        if move is not None:
+            score += min(abs(move) * 3.0, 20.0)
+    elif event.category == "Results" and enrichment_of(event).get("status") == "parsed":
+        pat = next((m for m in enrichment_of(event)["metrics"] if m["metric"] == "PAT"), {})
+        if pat.get("yoy_pct") is not None:
+            score += min(abs(pat["yoy_pct"]) / 2.0, 20.0)   # bigger surprises rank higher
 
     # 4. Portfolio Weight
     if holding and holding.weight:
@@ -168,33 +185,7 @@ def enrich_alert_reasons(
             facts.append(f"Disclosed percentage: {pct_matches[0]}")
 
     if category == "Price move":
-        metrics = extract_alert_metrics(f"{event.title} {event.summary} {' '.join(facts)}")
-        vol = metrics.get("volume_multiple")
-        pct = metrics.get("price_change_pct")
-        threshold = rule.threshold if rule else 2.0
-
-        has_rule_fact = any("threshold" in f.lower() or "alert rule" in f.lower() for f in facts)
-        if not has_rule_fact and threshold:
-            vol_info = f" (actual: {vol:.1f}×)" if vol else ""
-            facts.append(f"Alert rule: volume threshold is {threshold:.1f}× average{vol_info}")
-
-        if not why or why.startswith("Review the exchange filing"):
-            vol_str = f"{vol:.1f}×" if vol else "unusual"
-            pct_str = (
-                f"{pct:+.2f}%"
-                if pct is not None
-                else (
-                    f"{market_data.get('change_percent'):+.2f}%"
-                    if market_data and market_data.get("change_percent") is not None
-                    else "elevated volume"
-                )
-            )
-            why = (
-                f"Trading volume ran {vol_str} relative to typical levels with {pct_str} in share price. "
-                f"Volume anomalies exceeding your {threshold:.1f}× threshold indicate elevated market interest. "
-                "Monitor for follow-up company filings or sector-wide catalysts."
-            )
-
+        pass  # facts and "why" are written by the EOD trigger engine from the actual bars
     elif not why or why.startswith("Review the exchange filing"):
         enrichment_map = {
             "Results": f"{company.name}'s quarterly results establish the updated earnings run-rate. Compare reported revenue, operating margin, and PAT against historical quarters and stated management guidance.",
@@ -238,6 +229,16 @@ def deduplicate_alerts(alerts: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 deduped[idx] = alert
                 topic_map[topic_key] = alert
             continue
+
+        if cat == "Results":
+            res_key = (company_id, f"results:{published_day}")
+            if res_key in topic_map:
+                existing = topic_map[res_key]
+                if alert.get("enrichment", {}).get("status") == "parsed" and existing.get("enrichment", {}).get("status") != "parsed":
+                    deduped[deduped.index(existing)] = alert
+                    topic_map[res_key] = alert
+                continue
+            topic_map[res_key] = alert
 
         if cat == "Price move":
             move_key = (company_id, f"price-move:{published_day}")

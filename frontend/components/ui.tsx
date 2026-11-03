@@ -76,9 +76,12 @@ export function Change({ value, positive }: { value: string; positive: boolean }
 }
 
 const badgeColors: Record<string, string> = {
-  Earnings: "border-[#665636]/50 bg-[#352b1b] text-[#e2bc79]",
-  "Corporate action": "border-[#62434a]/50 bg-[#332126] text-[#e0a1aa]",
+  Results: "border-[#665636]/50 bg-[#352b1b] text-[#e2bc79]",
+  "Management changes": "border-[#4b4f7a]/50 bg-[#20223a] text-[#aab0f0]",
+  Acquisitions: "border-[#62434a]/50 bg-[#332126] text-[#e0a1aa]",
+  Fundraising: "border-[#62434a]/50 bg-[#332126] text-[#e0a1aa]",
   "Price move": "border-[#355d50]/50 bg-[#192d27] text-[#8fd2b6]",
+  EOD: "border-[#355d50]/50 bg-[#192d27] text-[#8fd2b6]",
   High: "border-[#704847]/50 bg-[#35201f] text-[#ef9b93]",
   Medium: "border-[#564a38]/50 bg-[#2c271f] text-[#d6b981]",
 };

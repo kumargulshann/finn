@@ -33,10 +33,14 @@ export default function ResearchPage() {
 
   useEffect(() => {
     let active = true;
-    Promise.all([searchCompanies(""), getDigest("7 days")]).then(([result, digest]) => {
+    Promise.all([searchCompanies(""), getDigest("30 days")]).then(([result, digest]) => {
       if (!active) return;
-      setCompanies(result.items); setEvents(digest.items.slice(0, 4));
-      setCompany(result.items.find((item) => item.symbol === "BHARTIARTL") ?? result.items[0] ?? null);
+      setCompanies(result.items);
+      const wanted = (new URLSearchParams(window.location.search).get("symbol") ?? "INFY").toUpperCase();
+      setEvents(digest.items.filter((item) => !item.routine));
+      const match = result.items.find((item) => item.symbol === wanted);
+      if (match) setCompany(match);
+      else searchCompanies(wanted).then((found) => { if (active) setCompany(found.items.find((item) => item.symbol === wanted) ?? found.items[0] ?? result.items[0] ?? null); }).catch(() => { if (active) setCompany(result.items[0] ?? null); });
     }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Could not load research data."))
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
@@ -101,7 +105,7 @@ export default function ResearchPage() {
     <PageHeading eyebrow="On-demand company intelligence" title="Research workspace" description="Search annual reports and earnings-call transcripts. Answers link to source documents and page numbers." action={<div className="flex flex-wrap items-center gap-2"><select aria-label="Companies to refresh" className="h-9 rounded-lg border border-white/[0.09] bg-[#0d1117] px-2 text-[9px] text-[#bdc5ce]" onChange={(event) => setRefreshLimit(Number(event.target.value))} value={refreshLimit}><option value={5}>5 companies</option><option value={10}>10 companies</option></select><button className="inline-flex h-9 items-center gap-2 rounded-lg border border-[#355848]/40 bg-[#15271f] px-3 text-[9px] font-semibold text-[#8fd3b7] disabled:opacity-50" disabled={refreshing} onClick={() => void refreshLibrary()} type="button"><Icon name="file" size={13} />{refreshing ? "Fetching documents…" : "Refresh source library"}</button></div>} />
     {refreshMessage && <p role="status" className="mb-3 rounded-lg border border-[#315744]/50 bg-[#15271f] p-3 text-[10px] text-[#9bd6b8]">{refreshMessage}</p>}
     {error && <p role="alert" className="mb-4 rounded-lg border border-[#673d3d] bg-[#2b191a] p-3 text-[10px] text-[#f1aaaa]">{error}</p>}
-    <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(280px,0.7fr)]">
+    <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(280px,0.7fr)]">
       <div className="space-y-5">
         <Panel className="p-4 sm:p-5">
           <label className="mb-2 block text-[10px] font-medium text-[#89939f]" htmlFor="company-search">Company or ticker</label>
@@ -173,7 +177,7 @@ export default function ResearchPage() {
         {!researchResult && !guidanceResult && <Panel><EmptyState icon="spark" title={researchLoading ? "Searching indexed documents" : "Research, with citations"} description={researchLoading ? "Retrieving source evidence from the selected company's reports and transcripts…" : "Choose a company and lens, then run research to retrieve evidence with source links and page references."} /></Panel>}
       </div>
       <aside className="space-y-5">
-        <Panel className="p-4 sm:p-5"><SectionTitle title="Recent portfolio events"/>{events.length ? events.map((event) => <Link key={event.id} href={"/events/" + event.id} className="flex items-start gap-2.5 rounded-lg px-1.5 py-2.5 hover:bg-white/[0.035]"><CompanyMark initials={event.initials} color={event.color} size="sm"/><span className="min-w-0 flex-1"><span className="block text-[10px] text-[#c7ced6]">{event.title}</span><span className="text-[9px] text-[#6e7985]">{event.company} · {event.time} · {event.is_demo ? "SAMPLE" : `${event.source_exchange} filing`}</span></span></Link>) : <p className="text-[10px] text-[#87919d]">{loading ? "Loading events…" : "No recent events."}</p>}</Panel>
+        <Panel className="p-4 sm:p-5"><SectionTitle title="Recent events" detail={company?.symbol}/>{events.filter((event) => event.symbol === company?.symbol).length ? events.filter((event) => event.symbol === company?.symbol).slice(0, 5).map((event) => <Link key={event.id} href={"/events/" + event.id} className="flex items-start gap-2.5 rounded-lg px-1.5 py-2.5 hover:bg-white/[0.035]"><CompanyMark initials={event.initials} color={event.color} size="sm"/><span className="min-w-0 flex-1"><span className="block text-[10px] text-[#c7ced6]">{event.title}</span><span className="text-[9px] text-[#6e7985]">{event.type} · {event.time}</span></span></Link>) : <p className="text-[10px] text-[#87919d]">{loading ? "Loading events…" : "No material events in the last 30 days."}</p>}</Panel>
         <Panel className="p-4 sm:p-5"><SectionTitle title="Companies to explore" detail="Outside your portfolio"/>{companies.filter((item) => !item.in_portfolio).map((item) => <button key={item.id} onClick={() => { setCompany(item); setInfo(null); setPriceHistory(null); setResearchResult(null); }} className="flex w-full items-center gap-3 rounded-lg px-1.5 py-2 text-left hover:bg-white/[0.04]"><CompanyMark initials={item.name[0]} color="#5e9f87" size="sm"/><span><span className="block text-[10px] text-[#cad0d7]">{item.name}</span><span className="text-[9px] text-[#737e89]">{item.symbol} · {item.sector}</span></span></button>)}</Panel>
         <Panel className="border-[#294739]/40 bg-[#17251f] p-4 sm:p-5"><p className="text-[10px] font-semibold text-[#c6e2d5]">Source-first by design</p><p className="mt-2 text-[9px] leading-5 text-[#899b91]">Missing evidence is called out rather than filled in.</p></Panel>
       </aside>

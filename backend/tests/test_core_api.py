@@ -8,19 +8,38 @@ from datetime import datetime, timedelta, timezone
 
 
 class DeterministicProvider:
+    """45 daily sessions per ticker. RELIANCE ends on a 2.4× volume day (+1.8%); DIXON on a −6% day."""
+
     def __init__(self) -> None:
         self.calls = 0
 
+    def bars(self, symbol: str) -> list[dict]:
+        today = datetime.now(timezone.utc)
+        out = []
+        for offset in range(44, -1, -1):
+            volume, close = 1000, 100.0
+            if offset == 0:
+                close = 101.0
+                if symbol.startswith("RELIANCE"):
+                    volume, close = 2400, 101.8
+                if symbol.startswith("DIXON"):
+                    close = 94.0
+            out.append({"date": today - timedelta(days=offset), "open": 100.0, "high": 102.0, "low": 98.0, "close": close, "volume": volume})
+        return out
+
     def fetch_history(self, symbol: str, period: str = "5d") -> list[dict]:
         self.calls += 1
-        today = datetime.now(timezone.utc)
-        return [{"date": today - timedelta(days=offset), "open": 99.0 + offset, "high": 102.0, "low": 98.0,
-                 "close": 101.0 - offset, "volume": 1000 + offset * 100} for offset in range(4, -1, -1)]
+        return self.bars(symbol)
+
+    def fetch_many(self, symbols: list[str], period: str = "3mo") -> dict[str, list[dict]]:
+        self.calls += 1
+        return {s: self.bars(s) for s in symbols}
 
 
 class EmptyProvider:
     def fetch_history(self, symbol: str, period: str = "5d") -> list[dict]:
         return []
+
 
 def test_seeded_core_workflow(tmp_path) -> None:
     app = create_app(Settings(database_url=f"sqlite:///{(tmp_path / 'core.db').as_posix()}", frontend_origin="http://localhost:3000"))
@@ -29,51 +48,62 @@ def test_seeded_core_workflow(tmp_path) -> None:
     with TestClient(app) as client:
         portfolio = client.get("/api/v1/portfolio")
         assert portfolio.status_code == 200
-        assert portfolio.json()["summary"]["companies_tracked"] == 8
-        assert portfolio.json()["is_demo"] is True
-        assert portfolio.json()["holdings"][0]["price"] == 101.0
-        assert portfolio.json()["holdings"][0]["market_data"]["volume"] == 1000
-        assert portfolio.json()["summary"]["portfolio_value"] is None
-        assert provider.calls == 8
+        body = portfolio.json()
+        assert body["summary"]["companies_tracked"] == 18
+        assert len({h["sector"] for h in body["holdings"]}) >= 12
+        assert abs(sum(h["weight"] for h in body["holdings"]) - 100) < 0.01
+        reliance = next(h for h in body["holdings"] if h["symbol"] == "RELIANCE")
+        assert reliance["price"] == 101.8 and reliance["volume_multiple"] == 2.4 and reliance["triggered"] is True
+        assert body["summary"]["portfolio_value"] is None
+        assert provider.calls == 1  # one batched request for all 18 tickers
         cached = client.get("/api/v1/portfolio").json()
         assert cached["holdings"][0]["market_data"]["status"] == "cached"
-        assert provider.calls == 8
+        assert provider.calls == 1
 
-        digest = client.get("/api/v1/digest")
-        assert digest.status_code == 200
-        assert digest.json()["count"] == 3
-        assert client.get("/api/v1/alerts").json()["count"] == 3
-        event_id = digest.json()["items"][0]["id"]
+        # No fabricated events: the digest is built only from real triggers (here: the two synthetic moves).
+        digest = client.get("/api/v1/digest").json()
+        assert digest["is_demo"] is False
+        symbols = {item["symbol"] for item in digest["items"]}
+        assert symbols == {"RELIANCE", "DIXON"}
+        rel = next(i for i in digest["items"] if i["symbol"] == "RELIANCE")
+        assert rel["type"] == "Price move" and rel["enrichment"]["volume_multiple"] == 2.4
+        assert "2.4×" in rel["title"]
+        event_id = rel["id"]
         detail = client.get(f"/api/v1/events/{event_id}")
-        assert detail.status_code == 200
+        assert detail.status_code == 200 and detail.json()["is_read"] is True
         assert client.get(f"/api/v1/alerts/{event_id}").status_code == 200
-        assert detail.json()["source"]
-        assert detail.json()["details"]
         assert client.patch(f"/api/v1/events/{event_id}", params={"is_saved": True}).json()["is_saved"] is True
 
+        # Thresholds re-filter instantly: volume 2.5× hides RELIANCE (2.4×); move 7% hides DIXON (−6%).
+        rules = {r["category"]: r for r in client.get("/api/v1/alert-rules").json()["items"]}
+        client.patch(f"/api/v1/alert-rules/{rules['Price move']['id']}", params={"threshold": 2.5})
+        assert {i["symbol"] for i in client.get("/api/v1/digest").json()["items"]} == {"DIXON"}
+        client.patch(f"/api/v1/alert-rules/{rules['Price change']['id']}", params={"threshold": 7})
+        assert client.get("/api/v1/digest").json()["count"] == 0
+        client.patch(f"/api/v1/alert-rules/{rules['Price move']['id']}", params={"threshold": 2.0})
+        assert {i["symbol"] for i in client.get("/api/v1/digest").json()["items"]} == {"RELIANCE"}
+
         search = client.get("/api/v1/companies", params={"q": "Bharti"})
-        assert search.status_code == 200
         company = search.json()["items"][0]
         info = client.get(f"/api/v1/companies/{company['id']}")
         assert info.status_code == 200
-        assert info.json()["metrics"]
-        assert info.json()["market_data"]["close"] == 101.0
+        assert info.json()["metrics"] == []  # no sample figures are seeded any more
+        history = client.get(f"/api/v1/companies/{company['id']}/prices?period=1mo")
+        assert history.status_code == 200 and history.json()["items"][-1]["volume"] == 1000
 
-        history = client.get(f"/api/v1/companies/{company['id']}/prices?period=5d")
-        assert history.status_code == 200
-        assert len(history.json()["items"]) == 5
-        assert history.json()["items"][-1]["volume"] == 1000
-
-        rules = client.get("/api/v1/alert-rules")
-        assert rules.status_code == 200
-        volume_rule = next(rule for rule in rules.json()["items"] if rule["category"] == "Price move")
-        updated = client.patch(f"/api/v1/alert-rules/{volume_rule['id']}", params={"threshold": 2.5})
-        assert updated.status_code == 200
-        assert updated.json()["threshold"] == 2.5
-
-        assert client.put("/api/v1/portfolio/holdings/ASIANPAINT", params={"enabled": True}).status_code == 200
-        assert client.get("/api/v1/portfolio").json()["summary"]["companies_tracked"] == 9
+        assert client.put("/api/v1/portfolio/holdings/ITC", params={"enabled": False}).status_code == 200
+        assert client.get("/api/v1/portfolio").json()["summary"]["companies_tracked"] == 17
         assert client.get("/api/v1/events/not-a-real-alert").status_code == 404
+
+
+def test_holdings_edits_survive_restart(tmp_path) -> None:
+    url = f"sqlite:///{(tmp_path / 'restart.db').as_posix()}"
+    for expected in (18, 17):
+        app = create_app(Settings(database_url=url))
+        app.state.market_data = MarketDataService(DeterministicProvider())
+        with TestClient(app) as client:
+            assert client.get("/api/v1/portfolio").json()["summary"]["companies_tracked"] == expected
+            client.put("/api/v1/portfolio/holdings/ITC", params={"enabled": False})
 
 
 def test_unavailable_ticker_never_uses_seed_price(tmp_path) -> None:
@@ -172,7 +202,7 @@ def test_research_document_ingestion_retrieval_and_evidence_gap(tmp_path) -> Non
     with TestClient(app) as client:
         refreshed = client.post("/api/v1/research/documents/refresh", params={"limit": 5}).json()
         assert refreshed["indexed"] == 2
-        assert refreshed["companies"] == ["ASIANPAINT", "BHARTIARTL", "HDFCBANK", "ICICIBANK", "INFY"]
+        assert refreshed["companies"] == ["ASIANPAINT", "BAJFINANCE", "BHARTIARTL", "DIXON", "HDFCBANK"]
         same = client.post("/api/v1/research/documents/refresh", params={"limit": 5}).json()
         assert same["unchanged"] == 2
 
@@ -521,101 +551,112 @@ def test_pull_research_infosys_and_icici_bank_grounded_experience(tmp_path) -> N
         assert len(unsupported["key_claims"]) == 0
 
 
+def _results_pdf() -> bytes:
+    import pymupdf
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((40, 50), "Statement of Unaudited Consolidated Financial Results for the quarter ended 30.09.2026 (Rs in Crore)", fontsize=8)
+    for x, d in ((300, "30.09.2026"), (370, "30.06.2026"), (440, "30.09.2025"), (510, "31.03.2026")):
+        page.insert_text((x, 90), "Quarter ended", fontsize=7)
+        page.insert_text((x, 100), d, fontsize=7)
+    rows = [("Revenue from operations", 1100, 1000, 900, 3800), ("Other income", 10, 10, 10, 40), ("Total income", 1110, 1010, 910, 3840),
+            ("Finance costs", 20, 20, 20, 80), ("Depreciation and amortisation expense", 30, 30, 30, 120),
+            ("Profit before tax", 200, 180, 150, 700), ("Tax expense", 50, 45, 40, 180), ("Net profit for the period", 150, 135, 110, 520)]
+    for i, (label, *vals) in enumerate(rows):
+        y = 130 + i * 16
+        page.insert_text((40, y), label, fontsize=8)
+        for x, v in zip((300, 370, 440, 510), vals):
+            page.insert_text((x, y), f"{v:,.2f}", fontsize=8)
+    return doc.tobytes()
+
+
+def _appointment_pdf() -> bytes:
+    import pymupdf
+    doc = pymupdf.open()
+    page = doc.new_page()
+    text = ("Sub: Appointment of Chief Financial Officer\n\nPursuant to Regulation 30, the Board approved the appointment of\n"
+            "Ms. Anita Rao as Chief Financial Officer with effect from 1 November 2026.\n\nBrief profile:\n"
+            "Ms. Anita Rao is a chartered accountant with 22 years of experience in finance.\nShe was previously CFO of an FMCG major and led its treasury and investor relations.\n"
+            "She holds an MBA from IIM Ahmedabad.\n\nYours faithfully,")
+    page.insert_text((40, 60), text, fontsize=9)
+    return doc.tobytes()
+
+
+class FakeFilingDownloader:
+    def download_pdf(self, url: str) -> bytes:
+        if url.endswith("results.pdf"):
+            return _results_pdf()
+        if url.endswith("people.pdf"):
+            return _appointment_pdf()
+        raise ValueError("not found")
+
+
 def test_push_experience_prioritization_thresholds_reasons_and_deduplication(tmp_path) -> None:
     app = create_app(Settings(database_url=f"sqlite:///{(tmp_path / 'push_test.db').as_posix()}", frontend_origin="http://localhost:3000"))
-    provider = DeterministicProvider()
-    app.state.market_data = MarketDataService(provider)
+    flat = DeterministicProvider()
+    flat.bars = lambda symbol: [{"date": datetime.now(timezone.utc) - timedelta(days=o), "open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0, "volume": 1000} for o in range(44, -1, -1)]
+    app.state.market_data = MarketDataService(flat)
+    now = datetime.now(timezone.utc)
+    base = {"published_at": now, "source_name": "NSE filing"}
+    results_text = "Bharti Airtel Limited has submitted to the Exchange, the financial results for the quarter ended September 30, 2026."
+    rows = [
+        {**base, "symbol": "BHARTIARTL", "exchange": "NSE", "external_id": "r1", "title": "Outcome of Board Meeting", "summary": results_text, "source_url": "https://nse.test/results.pdf"},
+        {**base, "symbol": "BHARTIARTL", "exchange": "BSE", "external_id": "r1b", "title": "Outcome of Board Meeting", "summary": results_text, "source_url": "https://bse.test/results.pdf"},
+        {**base, "symbol": "TCS", "exchange": "NSE", "external_id": "m1", "title": "Change in Management", "summary": "Appointment of Ms. Anita Rao as Chief Financial Officer.", "source_url": "https://nse.test/people.pdf"},
+        {**base, "symbol": "ITC", "exchange": "NSE", "external_id": "d1", "title": "Dividend", "summary": "Interim dividend and record date.", "source_url": "https://nse.test/div.pdf"},
+        {**base, "symbol": "INFY", "exchange": "NSE", "external_id": "c1", "title": "Analysts/Institutional Investor Meet/Con. Call Updates", "summary": "Transcript of the earnings call held on 23 October 2026.", "source_url": "https://nse.test/call.pdf"},
+        {**base, "symbol": "LT", "exchange": "NSE", "external_id": "n1", "title": "Copy of Newspaper Publication", "summary": "Newspaper publication of results.", "source_url": "https://nse.test/paper.pdf"},
+    ]
+    app.state.announcement_ingestion = AnnouncementIngestionService(FixedAnnouncementProvider(rows), pdf_downloader=FakeFilingDownloader())
 
     with TestClient(app) as client:
-        # 1. Check Initial 24-Hour Digest with default threshold = 2.0
+        refreshed = client.post("/api/v1/announcements/refresh", params={"days": 2}).json()
+        assert refreshed["inserted"] == 5 and refreshed["duplicates"] == 1  # NSE/BSE copy collapsed
+        assert refreshed["enrichment"] == {"attempted": 2, "parsed": 2, "failed": 0}
+
         digest = client.get("/api/v1/digest", params={"period": "24 hours"}).json()
-        assert digest["count"] == 3
-        items = digest["items"]
+        items = {i["symbol"]: i for i in digest["items"]}
+        assert digest["count"] == 5 and digest["material_count"] == 2
 
-        # Verify Prioritization Ranking:
-        # Item 0 must be High-impact Results (Bharti Airtel Q2 revenue +12.6%)
-        assert items[0]["symbol"] == "BHARTIARTL"
-        assert items[0]["type"] == "Earnings"
-        assert items[0]["impact"] == "High"
-        assert items[0]["priority_score"] > items[1]["priority_score"]
+        # Results first cut: QoQ and YoY read from the filing, page-cited, and the card leads the digest.
+        results = items["BHARTIARTL"]
+        assert digest["items"][0]["symbol"] == "BHARTIARTL"
+        e = results["enrichment"]
+        assert e["status"] == "parsed" and e["period"] == "Q2 FY27" and e["page"] == 1
+        revenue = next(m for m in e["metrics"] if m["metric"] == "Revenue")
+        assert (revenue["current"], revenue["previous_quarter"], revenue["year_ago"]) == (1100, 1000, 900)
+        assert (revenue["qoq_pct"], revenue["yoy_pct"]) == (10.0, 22.2)
+        ebitda = next(m for m in e["metrics"] if m["metric"] == "EBITDA")
+        assert ebitda["current"] == 200 + 20 + 30 - 10
+        assert "+22.2% YoY" in results["summary"] and "QoQ" in results["summary"]
+        assert "EBITDA margin" in results["why"] and "page 1" in results["why"]
 
-        # Item 1 must be Price move / Volume surge (Reliance volume 2.4x)
-        assert items[1]["symbol"] == "RELIANCE"
-        assert items[1]["type"] == "Price move"
-        assert items[1]["priority_score"] > items[2]["priority_score"]
+        # Management change: the incoming person and the profile come from the filing, with its page.
+        people = items["TCS"]["enrichment"]
+        assert people["status"] == "parsed" and people["action"] == "appointment"
+        assert people["people"][0]["name"] == "Ms. Anita Rao" and "chartered accountant" in people["people"][0]["profile"]
+        assert people["people"][0]["page"] == 1 and items["TCS"]["impact"] == "High"
 
-        # Item 2 must be Management change (TCS COO retirement)
-        assert items[2]["symbol"] == "TCS"
-        assert items[2]["type"] == "Corporate action"
+        # Routine filings are kept but flagged so the UI collapses them.
+        assert {s for s, i in items.items() if i["routine"]} == {"ITC", "INFY", "LT"}
+        assert items["INFY"]["type"] == "Earnings call" and items["LT"]["type"] == "Routine"
 
-        # 2. Check Clear Reasons & Event Facts
-        for item in items:
-            assert len(item["why"]) > 20
-            assert len(item["details"]) >= 3
-            detail = client.get(f"/api/v1/events/{item['id']}").json()
-            assert detail["why"] == item["why"]
-            assert len(detail["details"]) >= 3
+        # Category toggles filter the digest.
+        rules = {r["category"]: r for r in client.get("/api/v1/alert-rules").json()["items"]}
+        client.patch(f"/api/v1/alert-rules/{rules['Results']['id']}", params={"enabled": False})
+        assert "BHARTIARTL" not in {i["symbol"] for i in client.get("/api/v1/digest").json()["items"]}
+        client.patch(f"/api/v1/alert-rules/{rules['Results']['id']}", params={"enabled": True})
 
-        rel_alert = next(i for i in items if i["symbol"] == "RELIANCE")
-        assert any("threshold" in f.lower() or "alert rule" in f.lower() for f in rel_alert["details"])
-
-        # 3. Test Configurable Alert Thresholds in Settings:
-        rules = client.get("/api/v1/alert-rules").json()["items"]
-        price_rule = next(r for r in rules if r["category"] == "Price move")
-
-        # Change threshold from 2.0 to 2.5
-        patch_res = client.patch(f"/api/v1/alert-rules/{price_rule['id']}", params={"threshold": 2.5})
-        assert patch_res.status_code == 200
-        assert patch_res.json()["threshold"] == 2.5
-
-        # Digest must now FILTER OUT the 2.4x volume alert because 2.4 < 2.5!
-        digest_filtered = client.get("/api/v1/digest", params={"period": "24 hours"}).json()
-        assert digest_filtered["count"] == 2
-        symbols_in_digest = [i["symbol"] for i in digest_filtered["items"]]
-        assert "RELIANCE" not in symbols_in_digest
-        assert "BHARTIARTL" in symbols_in_digest
-        assert "TCS" in symbols_in_digest
-
-        # Lower threshold to 1.5 -> Reliance 2.4x alert must RE-APPEAR!
-        client.patch(f"/api/v1/alert-rules/{price_rule['id']}", params={"threshold": 1.5})
-        digest_reappeared = client.get("/api/v1/digest", params={"period": "24 hours"}).json()
-        assert digest_reappeared["count"] == 3
-        assert "RELIANCE" in [i["symbol"] for i in digest_reappeared["items"]]
-
-        # Disable Price move category toggle -> Reliance must disappear
-        client.patch(f"/api/v1/alert-rules/{price_rule['id']}", params={"enabled": False})
-        digest_disabled = client.get("/api/v1/digest", params={"period": "24 hours"}).json()
-        assert digest_disabled["count"] == 2
-        assert "RELIANCE" not in [i["symbol"] for i in digest_disabled["items"]]
-
-        # Re-enable category
-        client.patch(f"/api/v1/alert-rules/{price_rule['id']}", params={"enabled": True, "threshold": 2.0})
-        assert client.get("/api/v1/digest", params={"period": "24 hours"}).json()["count"] == 3
-
-        # 4. Test Deduplication with Real Exchange Filings
-        now = datetime.now(timezone.utc)
-        real_rows = [
-            {"symbol": "BHARTIARTL", "exchange": "NSE", "external_id": "real-results-101", "title": "Financial results for quarter ended September", "summary": "Detailed audited financials submitted to NSE.", "published_at": now, "source_url": "https://nsearchives.nseindia.com/101.pdf", "source_name": "NSE Announcement"},
-            {"symbol": "BHARTIARTL", "exchange": "BSE", "external_id": "real-results-bse", "title": "Financial results for quarter ended September", "summary": "Detailed audited financials submitted to BSE.", "published_at": now, "source_url": "https://bsearchives.bseindia.com/bse.pdf", "source_name": "BSE Announcement"},
-        ]
-        app.state.announcement_ingestion = AnnouncementIngestionService(FixedAnnouncementProvider(real_rows))
-        refresh_res = client.post("/api/v1/announcements/refresh", params={"days": 2, "limit": 10})
-        assert refresh_res.status_code == 200
-        assert refresh_res.json()["inserted"] == 1
-        assert refresh_res.json()["duplicates"] == 1
-
-        digest_after_real = client.get("/api/v1/digest", params={"period": "24 hours"}).json()
-        real_alert = next(i for i in digest_after_real["items"] if i["symbol"] == "BHARTIARTL")
-        assert real_alert["is_demo"] is False
-        assert len(real_alert["details"]) >= 3
-        assert any("Event category" in f for f in real_alert["details"])
+        # A second refresh does not re-download or duplicate anything.
+        again = client.post("/api/v1/announcements/refresh", params={"days": 2}).json()
+        assert again["inserted"] == 0 and again["enrichment"]["attempted"] == 0
 
 
 def test_company_coverage_outside_demo_portfolio(tmp_path) -> None:
     """Verify that any NSE-listed company can be discovered, searched by ticker or alias,
 
     and researched with strict data-availability handling (no fabricated numbers).
-    Tested across 5 companies outside the demo portfolio: SBIN, SUNPHARMA, HINDUNILVR, AXISBANK, WIPRO.
+    Tested across 5 companies outside the demo portfolio: SBIN, TATASTEEL, HINDUNILVR, AXISBANK, WIPRO.
     """
     app = create_app(Settings(database_url=f"sqlite:///{(tmp_path / 'coverage.db').as_posix()}", frontend_origin="http://localhost:3000"))
     provider = DeterministicProvider()
@@ -627,7 +668,7 @@ def test_company_coverage_outside_demo_portfolio(tmp_path) -> None:
         portfolio_symbols = {h["symbol"] for h in portfolio_res["holdings"]}
         test_targets = [
             ("SBIN", "State Bank of India", "Financial Services"),
-            ("SUNPHARMA", "Sun Pharmaceutical Industries Limited", "Healthcare"),
+            ("TATASTEEL", "Tata Steel Limited", "Basic Materials"),
             ("HINDUNILVR", "Hindustan Unilever Limited", "Consumer Defensive"),
             ("AXISBANK", "Axis Bank Limited", "Financial Services"),
             ("WIPRO", "Wipro Limited", "Technology"),
@@ -686,7 +727,7 @@ def test_company_coverage_outside_demo_portfolio(tmp_path) -> None:
             # Historical prices
             prices_res = client.get(f"/api/v1/companies/{cid}/prices?period=5d")
             assert prices_res.status_code == 200
-            assert len(prices_res.json()["items"]) == 5
+            assert 5 <= len(prices_res.json()["items"]) <= 8  # calendar week of daily bars
 
             # 4. Strict handling of unindexed documents (NO fabricated numbers or claims)
             docs_res = client.get(f"/api/v1/companies/{cid}/research/documents")

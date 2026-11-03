@@ -34,6 +34,34 @@ class YFinanceProvider:
             })
         return [bar for bar in bars if bar["close"] is not None]
 
+    def fetch_many(self, provider_symbols: list[str], period: str = "3mo") -> dict[str, list[dict[str, Any]]]:
+        """One batched Yahoo request for many tickers (far faster than N sequential calls)."""
+        if not provider_symbols:
+            return {}
+        frame = yf.download(provider_symbols, period=period, interval="1d", auto_adjust=False, actions=False,
+                            group_by="ticker", threads=True, progress=False)
+        out: dict[str, list[dict[str, Any]]] = {}
+        if frame is None or frame.empty:
+            return out
+        multi = getattr(frame.columns, "nlevels", 1) > 1
+        for symbol in provider_symbols:
+            try:
+                sub = frame[symbol] if multi else frame
+            except KeyError:
+                continue
+            bars = []
+            for stamp, row in sub.iterrows():
+                ts = stamp.to_pydatetime() if hasattr(stamp, "to_pydatetime") else stamp
+                if isinstance(ts, date) and not isinstance(ts, datetime):
+                    ts = datetime(ts.year, ts.month, ts.day)
+                bars.append({"date": ts, "open": _number(row.get("Open")), "high": _number(row.get("High")),
+                             "low": _number(row.get("Low")), "close": _number(row.get("Close")),
+                             "volume": _integer(row.get("Volume"))})
+            bars = [bar for bar in bars if bar["close"] is not None]
+            if bars:
+                out[symbol] = bars
+        return out
+
 
 def _number(value: Any) -> float | None:
     try:

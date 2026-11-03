@@ -91,7 +91,7 @@ export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
             <span className="size-1.5 rounded-full bg-[#e4ae63]" />
             <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#a2abb8]">Demo environment</span>
           </div>
-          <p className="mt-2 text-[11px] leading-5 text-[#727d8a]">Sample portfolio and announcements · live market quotes</p>
+          <p className="mt-2 text-[11px] leading-5 text-[#727d8a]">Demo portfolio · live NSE filings and EOD prices</p>
         </div>
         <div className="mt-4 flex items-center gap-3 px-2 pb-1">
           <div className="grid size-8 place-items-center rounded-full bg-[#253239] text-[11px] font-semibold text-[#a8d7c5]">SK</div>

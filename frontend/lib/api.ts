@@ -3,9 +3,19 @@ import type { AlertItem, Holding } from "@/lib/types";
 const apiBaseUrl = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").replace(/\/$/, "");
 
 export type MarketData = { status: "fresh" | "cached" | "stale" | "unavailable"; source: string; close: number | null; previous_close: number | null; change_percent: number | null; volume: number | null; market_as_of: string | null; fetched_at: string; error: string | null; is_demo: false };
-export type PortfolioResponse = { id: number | null; name: string; is_demo: boolean; holdings: ApiHolding[]; market_data_source?: string; latest_available_as_of?: string | null; summary?: { companies_tracked: number; portfolio_value: number | null; daily_change_value: number | null; daily_change_percent: number | null; valuation_status: string; valuation_note: string } };
-export type ApiHolding = { id: string; company_id: number; name: string; symbol: string; exchange: string; sector: string; price: number | null; change: number | null; positive: boolean | null; weight: number; market_data: MarketData | null; is_demo: boolean };
-export type ApiAlert = AlertItem & { company_id: number; sector: string; published_at: string; is_demo: boolean; is_read: boolean; is_saved: boolean; portfolio_weight: number | null; price: number | null; daily_change: number | null; market_data?: MarketData | null };
+export type PortfolioResponse = { id: number | null; name: string; is_demo: boolean; holdings: ApiHolding[]; market_data_source?: string; latest_available_as_of?: string | null; summary?: { companies_tracked: number; portfolio_value: number | null; daily_change_value: number | null; daily_change_percent: number | null; valuation_status: string; valuation_note: string }; thresholds?: { volume_multiple: number | null; move_pct: number | null } };
+export type ApiHolding = { id: string; company_id: number; name: string; symbol: string; exchange: string; sector: string; price: number | null; change: number | null; positive: boolean | null; weight: number; market_data: MarketData | null; is_demo: boolean; volume_multiple: number | null; signal_date: string | null; triggered: boolean };
+export type ResultsMetric = { metric: string; current: number | null; previous_quarter: number | null; year_ago: number | null; qoq_pct: number | null; yoy_pct: number | null };
+export type Person = { name: string | null; role: string | null; profile: string | null; page: number | null };
+export type Enrichment = {
+  kind?: "results" | "people" | "eod";
+  status?: "parsed" | "unparsed" | "unsupported" | "unavailable" | "no_profile";
+  reason?: string;
+  period?: string | null; basis?: string; unit?: string; page?: number; ebitda_definition?: string; metrics?: ResultsMetric[];
+  action?: string | null; people?: Person[];
+  trading_date?: string; close?: number; volume?: number | null; avg_volume_20d?: number | null; volume_multiple?: number | null; change_pct?: number | null; matched_filing?: string | null; matched_filing_title?: string | null;
+};
+export type ApiAlert = AlertItem & { enrichment?: Enrichment; routine?: boolean; priority_score?: number | null; company_id: number; sector: string; published_at: string; is_demo: boolean; is_read: boolean; is_saved: boolean; portfolio_weight: number | null; price: number | null; daily_change: number | null; market_data?: MarketData | null };
 export type CompanySearchResult = { id: number; name: string; symbol: string; exchange: string; sector: string; in_portfolio: boolean; is_demo: boolean };
 export type CompanyInfo = { id: number; name: string; sector: string; instruments: { symbol: string; exchange: string }[]; market_data: MarketData | null; in_portfolio: boolean; weight: number | null; metrics: { metric: string; value: number; unit: string; period: string; is_demo: boolean }[]; announcements: { id: string; title: string; summary: string; category: string; published_at: string; source_name: string; source_url: string; is_demo: boolean }[]; source_status: string; is_demo: boolean };
 export type AlertRule = { id: number; name: string; category: string; enabled: boolean; threshold: number | null };
@@ -32,7 +42,8 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const getPortfolio = () => apiFetch<PortfolioResponse>("/portfolio");
-export const getDigest = (period: string) => apiFetch<{ items: ApiAlert[]; count: number; is_demo: boolean }>(`/digest?period=${encodeURIComponent(period)}`);
+export type DigestResponse = { items: ApiAlert[]; count: number; material_count: number; filtered_by_rules: number; period: string; is_demo: boolean };
+export const getDigest = (period: string) => apiFetch<DigestResponse>(`/digest?period=${encodeURIComponent(period)}`);
 export const getAlert = (id: string) => apiFetch<ApiAlert>(`/events/${encodeURIComponent(id)}`);
 export const updateAlert = (id: string, update: { is_read?: boolean; is_saved?: boolean }) => apiFetch<{ id: string; is_read: boolean; is_saved: boolean }>(`/events/${encodeURIComponent(id)}?${new URLSearchParams(Object.entries(update).map(([key, value]) => [key, String(value)]))}`, { method: "PATCH" });
 export const searchCompanies = (q = "") => apiFetch<{ items: CompanySearchResult[]; is_demo: boolean }>(`/companies?q=${encodeURIComponent(q)}`);

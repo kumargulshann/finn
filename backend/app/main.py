@@ -1,3 +1,5 @@
+import logging
+import threading
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -38,7 +40,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         command.upgrade(migration_config, "head")
         with session_factory() as session:
             seed_demo_data(session)
+        stop = threading.Event()
+        if app_settings.auto_refresh_hours > 0:
+            threading.Thread(target=_refresh_loop, args=(app, session_factory, app_settings.auto_refresh_hours, stop), daemon=True).start()
         yield
+        stop.set()
         engine.dispose()
 
     app = FastAPI(title="FINN API", version="0.1.0", lifespan=lifespan)
@@ -61,6 +67,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(announcement_router, prefix="/api/v1")
     app.include_router(research_router, prefix="/api/v1")
     return app
+
+
+def _refresh_loop(app: FastAPI, session_factory, hours: float, stop: threading.Event) -> None:
+    """Pull fresh NSE filings for the portfolio on a timer. Failures (e.g. NSE blocking a cloud IP) are
+    logged and the app keeps serving the last good data."""
+    log = logging.getLogger("finn.refresh")
+    stop.wait(30)
+    while not stop.is_set():
+        try:
+            with session_factory() as session:
+                result = app.state.announcement_ingestion.refresh(session, days=7)
+                log.info("filings refresh: inserted=%s enriched=%s errors=%s", result["inserted"], result["enrichment"], len(result["errors"]))
+        except Exception as exc:  # never crash the server over a feed outage
+            log.warning("filings refresh failed: %s", exc)
+        stop.wait(hours * 3600)
 
 
 app = create_app()

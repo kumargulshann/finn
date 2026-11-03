@@ -106,6 +106,7 @@ class Announcement(Base):
     source_exchange: Mapped[str] = mapped_column(String(8), default="DEMO")
     source_key: Mapped[str | None] = mapped_column(String(160), unique=True, nullable=True, index=True)
     fingerprint: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True, index=True)
+    enrichment_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class ResearchDocument(Base):

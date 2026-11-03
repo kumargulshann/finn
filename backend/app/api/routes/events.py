@@ -7,8 +7,14 @@ from app.services.alert_engine import (
     calculate_priority_score,
     deduplicate_alerts,
     enrich_alert_reasons,
+    enrichment_of,
     should_include_alert,
 )
+from app.services.eod_triggers import sync_triggers
+from app.services.filing_enrichment import results_why
+
+PERIOD_SECONDS = {"24 hours": 86400, "7 days": 7 * 86400, "30 days": 30 * 86400}
+LOW_SIGNAL = {"Routine", "Earnings call", "Investor meetings", "Corporate actions", "Insider trading"}
 
 router = APIRouter(tags=["alerts"])
 
@@ -26,9 +32,19 @@ def _serialize(
     if published.tzinfo is None:
         published = published.replace(tzinfo=timezone.utc)
     minutes = max(1, int((datetime.now(timezone.utc) - published).total_seconds() / 60))
-    time_label = f"{minutes} min ago" if minutes < 60 else ("Yesterday" if minutes > 720 else f"{minutes // 60} hr ago")
+    if minutes < 60:
+        time_label = f"{minutes} min ago"
+    elif minutes < 24 * 60:
+        time_label = f"{minutes // 60} hr ago"
+    elif minutes < 48 * 60:
+        time_label = "Yesterday"
+    else:
+        time_label = f"{minutes // 1440} days ago"
 
     why, facts = enrich_alert_reasons(event, company, instrument, holding, market_data, rule)
+    enrichment = enrichment_of(event)
+    if enrichment.get("kind") == "results":
+        why = results_why(enrichment) or why
 
     return {
         "id": event.slug,
@@ -59,53 +75,63 @@ def _serialize(
         "daily_change": market_data.get("change_percent") if market_data else None,
         "market_data": market_data,
         "priority_score": score,
+        "enrichment": enrichment,
+        "routine": event.category in LOW_SIGNAL or event.severity == "Low",
     }
 
 
 @router.get("/digest")
 @router.get("/alerts")
-def get_digest(request: Request, period: str = "24 hours", category: str | None = None, limit: int = 50) -> dict:
+def get_digest(request: Request, period: str = "24 hours", category: str | None = None, limit: int = 150) -> dict:
+    window = PERIOD_SECONDS.get(period, PERIOD_SECONDS["24 hours"])
     with request.app.state.session_factory() as session:
         portfolio = session.scalar(select(Portfolio).limit(1))
-        tracked_ids = set(session.scalars(select(PortfolioHolding.company_id).where(PortfolioHolding.portfolio_id == portfolio.id))) if portfolio else set()
+        holdings = {h.company_id: h for h in session.scalars(select(PortfolioHolding).where(PortfolioHolding.portfolio_id == portfolio.id))} if portfolio else {}
+        tracked_instruments = session.scalars(select(Instrument).where(Instrument.exchange == "NSE", Instrument.company_id.in_(holdings))).all()
 
-        rules = session.scalars(select(AlertRule)).all()
-        rules_by_category = {rule.category: rule for rule in rules}
+        # Triggered alerts: refresh EOD bars (batched, cached) and recompute threshold crossings.
+        market = request.app.state.market_data
+        market.refresh_many(session, list(tracked_instruments))
+        sync_triggers(session, list(tracked_instruments))
 
-        query = select(Announcement, Company, Instrument).join(Company, Announcement.company_id == Company.id).join(Instrument, Instrument.company_id == Company.id).where(Instrument.exchange == "NSE").order_by(Announcement.published_at.desc()).limit(min(max(limit, 1), 100))
-        rows = session.execute(query).all()
-        out = []
-        for event, company, instrument in rows:
-            age_seconds = (datetime.now(timezone.utc) - (event.published_at.replace(tzinfo=timezone.utc) if event.published_at.tzinfo is None else event.published_at)).total_seconds()
-            if age_seconds > (86400 if period == "24 hours" else 604800):
+        rules_by_category = {rule.category: rule for rule in session.scalars(select(AlertRule))}
+        cutoff = datetime.now(timezone.utc).timestamp() - window
+        query = (select(Announcement, Company, Instrument)
+                 .join(Company, Announcement.company_id == Company.id)
+                 .join(Instrument, Instrument.company_id == Company.id)
+                 .where(Instrument.exchange == "NSE")
+                 .order_by(Announcement.published_at.desc()).limit(600))
+        out, filtered = [], 0
+        quotes: dict[int, dict] = {}
+        for event, company, instrument in session.execute(query).all():
+            published = event.published_at if event.published_at.tzinfo else event.published_at.replace(tzinfo=timezone.utc)
+            if published.timestamp() < cutoff:
                 continue
             if category and event.category.lower() != category.lower():
                 continue
-            if portfolio and company.id not in tracked_ids:
+            if portfolio and company.id not in holdings:
                 continue
-
-            rule = rules_by_category.get(event.category)
-            # Evaluate category enablement and threshold
             included, _ = should_include_alert(event, rules_by_category)
             if not included:
+                filtered += 1
                 continue
-
-            holding = session.get(PortfolioHolding, (portfolio.id, company.id)) if portfolio else None
-            quote = request.app.state.market_data.quote(session, instrument)
+            holding = holdings.get(company.id)
+            if instrument.id not in quotes:
+                quotes[instrument.id] = market.quote(session, instrument)
+            quote = quotes[instrument.id]
             score = calculate_priority_score(event, holding, quote)
-            out.append(_serialize(event, company, instrument, holding, quote, rule, score))
+            out.append(_serialize(event, company, instrument, holding, quote, rules_by_category.get(event.category), score))
 
-        # Deduplicate alerts
         deduped = deduplicate_alerts(out)
-
-        # Sort by composite priority score (Financial impact, event type, market move, recency)
         deduped.sort(key=lambda item: item.get("priority_score", 0.0), reverse=True)
-        result_items = deduped[:limit]
-
+        items = deduped[:limit]
         return {
-            "items": result_items,
-            "count": len(result_items),
-            "is_demo": all(item["is_demo"] for item in result_items) if result_items else True,
+            "items": items,
+            "count": len(items),
+            "material_count": sum(1 for item in items if not item["routine"]),
+            "filtered_by_rules": filtered,
+            "period": period if period in PERIOD_SECONDS else "24 hours",
+            "is_demo": False,
         }
 
 
@@ -122,6 +148,9 @@ def get_event(event_id: str, request: Request) -> dict:
         quote = request.app.state.market_data.quote(session, instrument)
         rule = session.scalar(select(AlertRule).where(AlertRule.category == event.category).limit(1))
         score = calculate_priority_score(event, holding, quote)
+        if not event.is_read:
+            event.is_read = True
+            session.commit()
         return _serialize(event, company, instrument, holding, quote, rule, score)
 
 

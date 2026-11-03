@@ -7,7 +7,7 @@ router = APIRouter(tags=["announcements"])
 
 
 @router.post("/announcements/refresh")
-def refresh_announcements(request: Request, days: int = Query(7, ge=1, le=30), limit: int = Query(10, ge=1, le=10)) -> dict:
+def refresh_announcements(request: Request, days: int = Query(7, ge=1, le=30), limit: int = Query(25, ge=1, le=30)) -> dict:
     """Pull the configured NSE/BSE universe into SQLite. Suitable for a scheduler or manual refresh."""
     with request.app.state.session_factory() as session:
         try:
