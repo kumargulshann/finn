@@ -1,0 +1,1 @@
+"""Corporate announcement provider adapters."""
