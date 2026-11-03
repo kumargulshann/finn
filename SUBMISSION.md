@@ -9,7 +9,7 @@ Hello ENAM team,
 
 Here is my submission for the FINN build challenge.
 
-- **Try it on your phone:** {{LIVE_URL}} (the free host sleeps when idle, so the first load can take up to a minute)
+- **Try it on your phone:** https://finn-c0t0.onrender.com (the free host sleeps when idle, so the first load can take up to a minute)
 - **Repository:** https://github.com/kumargulshann/finn
 - **AI build history:** https://github.com/kumargulshann/finn/tree/main/build-history. This holds six sessions across Antigravity, Codex and Claude Code, including the attempts I threw away.
 

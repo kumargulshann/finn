@@ -5703,3 +5703,321 @@ stopped 8000
 ### 🤖 Assistant · 2026-11-04 02:48 IST
 
 Everything passes: 13 backend tests, typecheck, lint and the production build. I'm refreshing the build-history export so it includes this session, then reviewing what will be committed:
+
+<details><summary>🔧 <code>Bash</code></summary>
+
+```
+cd /e/EnamFinal; sed -i 's/| 6 | 4 Nov | Claude Code · Opus 5.5 | Packaging: single-container Docker deploy (Next.js + FastAPI), a seed snapshot of the indexed filings, Render blueprint, this history export, and the submission writeup. |/| 6 | 4 Nov | Claude Code · Opus 5.5 | Packaging (single-container Docker deploy, seed snapshot, this history export, writeup), then closing the gaps the writeup admitted: an 18-stock portfolio, real EOD triggers (volume ×, daily %), a results-PDF parser giving QoQ\/YoY with accounting cross-checks (it caught a misread L\&T column), executive profiles extracted from filings, classification on the reference taxonomy, removal of all sample events, and fixes to mobile overflow verified with emulated-phone screenshots. |/' build-history/README.md; grep -c "closing the gaps" build-history/README.md
+H=/c/Users/gulsh/AppData/Local/Temp/claude/27ddf3b3aa056d61/c32a5139-202d-4c90-a264-929db2d2ed46/scratchpad/hist; .venv/Scripts/python $H/export.py $H/sessions.json build-history | tail -1; cp $H/export.py build-history/tools/; grep -lE "[A-Za-z0-9._%+-]+@gmail\.com" build-history/*.md; git status --short
+```
+
+**Result:**
+
+```
+1
+06-claude-code-packaging.md {'user': 2, 'assistant': 82, 'tool': 175} 232 KB
+ M Dockerfile
+ M README.md
+ M SUBMISSION.md
+ M backend/app/api/routes/admin_refresh.py
+ M backend/app/api/routes/events.py
+ M backend/app/api/routes/portfolio.py
+ M backend/app/config.py
+ M backend/app/domain/models.py
+ M backend/app/integrations/stocks/yfinance_provider.py
+ M backend/app/main.py
+ M backend/app/services/alert_engine.py
+ M backend/app/services/announcement_ingestion.py
+ M backend/app/services/market_data.py
+ M backend/app/services/seed.py
+ M backend/seed/finn.db
+ M backend/tests/test_core_api.py
+ M backend/tests/test_e2e_workflow.py
+ M build-history/06-claude-code-packaging.md
+ M build-history/REA
+… [truncated 556 chars]
+```
+
+</details>
+
+
+### 🤖 Assistant · 2026-11-04 02:48 IST
+
+The change set is exactly what I intended, with no stray files. Committing and pushing to main as you approved earlier:
+
+<details><summary>🔧 <code>Bash</code></summary>
+
+```
+cd /e/EnamFinal; git add -A; git commit -q -F - <<'EOF'
+feat: close PUSH gaps — real EOD triggers, results QoQ/YoY first cut, filing-sourced profiles
+
+- Portfolio: 18 holdings across 13 sectors (large to small cap); holdings synced once per
+  version so Settings edits survive restarts; batched Yahoo quotes (1 request, not 18)
+- Triggered alerts from real end-of-day bars: volume vs 20-day average and daily % move,
+  both user-configurable; each alert notes whether the company filed that session
+- Results first cut parsed from the filing PDF: Revenue, EBITDA (derived), PBT, PAT for
+  current / previous / year-ago quarter with QoQ and YoY; columns matched by header date
+  and verified against the total-income identity; unverifiable filings say so
+- Management changes: incoming/outgoing person's profile extracted from the SEBI
+  disclosure with page citation, plus a LinkedIn search link (no scraping, no invented bios)
+- Classification on the reference taxonomy (earnings call, investor meetings, credit
+  rating, pledging, routine...); routine filings flagged and collapsed
+- Removed all hand-written sample events and sample metrics
+- Digest: working 30-day window, material/routine split,
+… [truncated 399 chars]
+```
+
+**Result:**
+
+```
+warning: in the working copy of 'README.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/app/api/routes/admin_refresh.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/app/domain/models.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/app/services/alert_engine.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'build-history/README.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'frontend/app/events/[eventId]/page.tsx', LF will be replaced by CRL
+… [truncated 1,413 chars]
+```
+
+</details>
+
+
+### 🤖 Assistant · 2026-11-04 02:49 IST
+
+Every gap the writeup admitted is now fixed or plainly stated, and it's pushed to main (`ffb72c2`). The 13 backend tests, typecheck, lint and production build all pass. I checked every screen in a real 390px phone viewport.
+
+## What changed
+
+| Before | Now |
+|---|---|
+| 8 holdings | 18 holdings across 13 sectors, Reliance down to Kaynes, fetched in one Yahoo request instead of 18 |
+| Fake "Reliance 2.4×" sample alert | Triggers computed from real end-of-day prices: volume against its 20-day average, and the daily % move. You set both in Settings, and each alert says whether the company filed anything that day |
+| Results showed YoY only | FINN reads the actual results PDF: Revenue, EBITDA, PBT and PAT for this quarter, last quarter and a year ago, with QoQ and YoY and a link to the page |
+| No bios on management changes | The person's profile is taken from the filing itself, with the page, plus a LinkedIn *search* link (no scraping, nothing invented) |
+| Hand-written sample events and figures | All removed; everything shown comes from NSE filings or price data |
+| Con-call notices and dividend filings tagged as Results or management changes; "30 days" actually showed 7 | Filings sorted into the reference categories, with routine ones collapsed; the 30-day window is real |
+| Research page too wide on phones | Fixed and verified at 390px |
+
+**Results parsing:** a wrong number is worse than none, so the parser checks each column's date and that revenue plus other income equals total income. That check caught one real misread: L&T would have shown −46% YoY instead of the correct +15.8%. On last month's real filings, 8 of 13 non-bank results parsed and verified. The other five, banks included, show "not available" with the reason and a link to the filing.
+
+**Still not done (stated in the writeup):** answers come from retrieved passages, not an LLM; there are no phone notifications; and a few unusual results layouts aren't parsed.
+
+## Step by step: what you do now
+
+**1. Deploy (about 10 minutes)**
+1. Go to **render.com** and click **Get Started**, then sign in with GitHub.
+2. Click **New +** → **Blueprint**.
+3. Connect GitHub if asked, and pick **kumargulshann/finn**.
+4. Render reads `render.yaml` and shows one service, `finn`, on the free plan. Click **Apply**.
+5. Wait for the build to show **Live**, usually 5–10 minutes. The logs should end with uvicorn and Next.js starting.
+6. Copy the URL at the top, something like `https://finn-xxxx.onrender.com`.
+
+**2. Send me the URL.** I'll open it, check every screen works, put it in place of `{{LIVE_URL}}` in the README and SUBMISSION.md, and push. If the build fails, paste me the last 30 lines of the Render log.
+
+**3. Test it on your phone**
+1. Open the URL. The first load can take about a minute while the free server wakes up.
+2. Tap **30d**, then open a Results card such as L&T, Reliance or Asian Paints to see the QoQ/YoY table and its page link.
+3. Open a Management changes card such as NTPC or Dixon to see the profile from the filing.
+4. In **Settings**, raise *Unusual volume* to 3.0×, then go back to **Today**: the weaker alerts disappear.
+5. In **Research**, pick Infosys and run **Guidance vs Actual**.
+
+**4. Send the email**
+- **To:** assessment@enam.com
+- **Subject:** ENAM - IIT screening - 2027
+- **Body:** paste the text of `SUBMISSION.md` from "Hello ENAM team" down to your name, once the live link is in it.
+- **Links:** the live URL, `github.com/kumargulshann/finn`, and `…/tree/main/build-history`.
+
+**5. Before the review:** open the live link once so it's awake. The deployed app also pulls new NSE filings every 4 hours.
+
+
+---
+
+## 🧑 User · 2026-11-04 03:02 IST
+
+> this is log report after deploying on render "
+> 
+> <pasted_content id="888c">
+> 2026-11-03T21:28:42.544723389Z #21 10.11    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 552.8/552.8 kB 855.9 MB/s eta 0:00:00
+> 2026-11-03T21:28:42.544724846Z #21 10.12 Downloading multitasking-0.0.13-py3-none-any.whl (16 kB)
+> 2026-11-03T21:28:42.544726409Z #21 10.13 Downloading numpy-2.5.4-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (16.7 MB)
+> 2026-11-03T21:28:42.647981391Z #21 10.18    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 16.7/16.7 MB 379.0 MB/s eta 0:00:00
+> 2026-11-03T21:28:42.647997411Z #21 10.19 Downloading opentelemetry_api-1.45.2-py3-none-any.whl (60 kB)
+> 2026-11-03T21:28:42.647999464Z #21 10.20 Downloading pandas-3.1.0-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (12.0 MB)
+> 2026-11-03T21:28:42.648000982Z #21 10.23    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 12.0/12.0 MB 338.9 MB/s eta 0:00:00
+> 2026-11-03T21:28:42.648002785Z #21 10.24 Downloading peewee-4.5.3-py3-none-any.whl (194 kB)
+> 2026-11-03T21:28:42.648004317Z #21 10.25 Downloading platformdirs-4.14.3-py3-none-any.whl (35 kB)
+> 2026-11-03T21:28:42.648006219Z #21 10.26 Downloading protobuf-7.36.2-cp310-abi3-manylinux2014_x86_64.whl (343 kB)
+> 2026-11-03T21:28:42.648007622Z #21 10.27 Downloading pydantic-2.14.2-py3-none-any.whl (490 kB)
+> 2026-11-03T21:28:42.648009076Z #21 10.28 Downloading pydantic_core-2.50.2-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (2.2 MB)
+> 2026-11-03T21:28:42.749863355Z #21 10.29    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.2/2.2 MB 370.0 MB/s eta 0:00:00
+> 2026-11-03T21:28:42.749880756Z #21 10.30 Downloading python_dotenv-1.2.4-py3-none-any.whl (23 kB)
+> 2026-11-03T21:28:42.749882805Z #21 10.31 Downloading pytz-2026.6-py2.py3-none-any.whl (506 kB)
+> 2026-11-03T21:28:42.749884868Z #21 10.32 Downloading pyyaml-6.0.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (807 kB)
+> 2026-11-03T21:28:42.749886553Z #21 10.32    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 807.9/807.9 kB 863.5 MB/s eta 0:00:00
+> 2026-11-03T21:28:42.749887965Z #21 10.33 Downloading requests-2.34.2-py3-none-any.whl (73 kB)
+> 2026-11-03T21:28:42.749889291Z #21 10.34 Downloading idna-3.20-py3-none-any.whl (69 kB)
+> 2026-11-03T21:28:42.749890519Z #21 10.35 Downloading starlette-1.10.0-py3-none-any.whl (80 kB)
+> 2026-11-03T21:28:42.749891841Z #21 10.35 Downloading anyio-4.16.0-py3-none-any.whl (134 kB)
+> 2026-11-03T21:28:42.74989318Z #21 10.36 Downloading typing_extensions-4.16.0-py3-none-any.whl (45 kB)
+> 2026-11-03T21:28:42.749894814Z #21 10.37 Downloading typing_inspection-0.4.4-py3-none-any.whl (14 kB)
+> 2026-11-03T21:28:42.749896316Z #21 10.38 Downloading uvloop-0.23.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (4.5 MB)
+> 2026-11-03T21:28:42.852165405Z #21 10.40    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.5/4.5 MB 392.3 MB/s eta 0:00:00
+> 2026-11-03T21:28:42.852181037Z #21 10.40 Downloading watchfiles-1.3.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (458 kB)
+> 2026-11-03T21:28:42.85219072Z #21 10.41 Downloading websockets-17.4-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (226 kB)
+> 2026-11-03T21:28:42.852192787Z #21 10.42 Downloading mako-1.4.3-py3-none-any.whl (80 kB)
+> 2026-11-03T21:28:42.852194525Z #21 10.43 Downloading annotated_types-0.8.0-py3-none-any.whl (13 kB)
+> 2026-11-03T21:28:42.852195917Z #21 10.44 Downloading cffi-2.1.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (221 kB)
+> 2026-11-03T21:28:42.852198422Z #21 10.45 Downloading charset_normalizer-3.5.2-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (257 kB)
+> 2026-11-03T21:28:42.852199856Z #21 10.46 Downloading markupsafe-3.0.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (22 kB)
+> 2026-11-03T21:28:42.852201191Z #21 10.47 Downloading python_dateutil-4.0.0-py3-none-any.whl (92 kB)
+> 2026-11-03T21:28:42.852202704Z #21 10.48 Downloading soupsieve-4.0-py3-none-any.whl (50 kB)
+> 2026-11-03T21:28:42.852204167Z #21 10.48 Downloading urllib3-2.8.0-py3-none-any.whl (135 kB)
+> 2026-11-03T21:28:43.006413304Z #21 10.49 Downloading pycparser-3.12-py3-none-any.whl (62 kB)
+> 2026-11-03T21:28:43.006430285Z #21 10.50 Downloading tzdata-2026.6-py2.py3-none-any.whl (348 kB)
+> 2026-11-03T21:28:43.006432022Z #21 10.64 Building wheels for collected packages: finn-api, sqlalchemy
+> 2026-11-03T21:28:43.157479002Z #21 10.64   Building wheel for finn-api (pyproject.toml): started
+> 2026-11-03T21:28:43.242742756Z #21 10.87   Building wheel for finn-api (pyproject.toml): finished with status 'done'
+> 2026-11-03T21:28:43.396484889Z #21 10.88   Created wheel for finn-api: filename=finn_api-0.1.0-py3-none-any.whl size=77611 sha256=2d8efadffc8ce3bc233969f978c98d828ade63eba75dd9ddad49f849adb6cdcb
+> 2026-11-03T21:28:43.396499211Z #21 10.88   Stored in directory: /tmp/pip-ephem-wheel-cache-3vtior9m/wheels/91/0a/7b/e1306506b94d5eedf38bd9e74910a6a2271d810c5fb6bdbeda
+> 2026-11-03T21:28:43.396501653Z #21 10.88   Building wheel for sqlalchemy (pyproject.toml): started
+> 2026-11-03T21:28:46.090725134Z #21 13.72   Building wheel for sqlalchemy (pyproject.toml): finished with status 'done'
+> 2026-11-03T21:28:46.247612655Z #21 13.73   Created wheel for sqlalchemy: filename=sqlalchemy-2.1.7-cp312-cp312-linux_x86_64.whl size=2067649 sha256=80674871e7f654eca61010fb6e78dffc98aca289e00b42f9f932bd6ab66ac9d8
+> 2026-11-03T21:28:46.247632192Z #21 13.73   Stored in directory: /tmp/pip-ephem-wheel-cache-3vtior9m/wheels/56/59/34/ecab2fb1548072c82e178b4d88ad5cfb50fa1d2febde6fc50e
+> 2026-11-03T21:28:46.247634708Z #21 13.73 Successfully built finn-api sqlalchemy
+> 2026-11-03T21:28:46.254468564Z #21 13.89 Installing collected packages: pytz, multitasking, websockets, uvloop, urllib3, tzdata, typing-extensions, soupsieve, pyyaml, python-dotenv, PyMuPDF, pycparser, protobuf, platformdirs, peewee, numpy, MarkupSafe, idna, httptools, h11, frozendict, click, charset_normalizer, certifi, annotated-types, annotated-doc, uvicorn, typing-inspection, sqlalchemy, requests, python-dateutil, pydantic-core, opentelemetry-api, Mako, httpcore, cffi, beautifulsoup4, anyio, watchfiles, starlette, pydantic, pandas, httpx, curl_cffi, alembic, yfinance, pydantic-settings, fastapi, finn-api
+> 2026-11-03T21:28:58.125802387Z #21 25.76 Successfully installed Mako-1.4.3 MarkupSafe-3.0.4 PyMuPDF-1.28.2 alembic-1.20.1 annotated-doc-0.0.5 annotated-types-0.8.0 anyio-4.16.0 beautifulsoup4-4.15.0 certifi-2026.10.23 cffi-2.1.1 charset_normalizer-3.5.2 click-8.5.0 curl_cffi-0.17.0 fastapi-0.162.0 finn-api-0.1.0 frozendict-2.5.1 h11-0.16.0 httpcore-1.0.9 httptools-0.9.0 httpx-0.28.1 idna-3.20 multitasking-0.0.13 numpy-2.5.4 opentelemetry-api-1.45.2 pandas-3.1.0 peewee-4.5.3 platformdirs-4.14.3 protobuf-7.36.2 pycparser-3.12 pydantic-2.14.2 pydantic-core-2.50.2 pydantic-settings-2.16.2 python-dateutil-4.0.0 python-dotenv-1.2.4 pytz-2026.6 pyyaml-6.0.3 requests-2.34.2 soupsieve-4.0 sqlalchemy-2.1.7 starlette-1.10.0 typing-extensions-4.16.0 typing-inspection-0.4.4 tzdata-2026.6 urllib3-2.8.0 uvicorn-0.54.0 uvloop-0.23.0 watchfiles-1.3.0 websockets-17.4 yfinance-0.2.66
+> 2026-11-03T21:28:58.351828109Z #21 25.76 WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
+> 2026-11-03T21:28:58.351846137Z #21 25.83 
+> 2026-11-03T21:28:58.35184874Z #21 25.83 [notice] A new release of pip is available: 25.0.1 -> 26.3
+> 2026-11-03T21:28:58.351851455Z #21 25.83 [notice] To update, run: pip install --upgrade pip
+> 2026-11-03T21:29:00.19663002Z #21 DONE 27.8s
+> 2026-11-03T21:29:00.34740848Z 
+> 2026-11-03T21:29:00.347430078Z #22 [stage-1  9/13] COPY --from=web /web/.next/standalone frontend/
+> 2026-11-03T21:29:00.485684586Z #22 DONE 0.3s
+> 2026-11-03T21:29:00.670499782Z 
+> 2026-11-03T21:29:00.670519735Z #23 [stage-1 10/13] COPY --from=web /web/.next/static frontend/.next/static
+> 2026-11-03T21:29:00.670521782Z #23 DONE 0.0s
+> 2026-11-03T21:29:00.670523062Z 
+> 2026-11-03T21:29:00.67052474Z #24 [stage-1 11/13] COPY --from=web /web/public frontend/public
+> 2026-11-03T21:29:00.670526151Z #24 DONE 0.0s
+> 2026-11-03T21:29:00.670527408Z 
+> 2026-11-03T21:29:00.670528883Z #25 [stage-1 12/13] COPY deploy/start.sh /app/start.sh
+> 2026-11-03T21:29:00.670530502Z #25 DONE 0.0s
+> 2026-11-03T21:29:00.670531742Z 
+> 2026-11-03T21:29:00.670533525Z #26 [stage-1 13/13] RUN chmod +x /app/start.sh && useradd -m -u 1000 finn && chown -R finn /app
+> 2026-11-03T21:29:01.177580857Z #26 DONE 0.7s
+> 2026-11-03T21:29:01.328865928Z 
+> 2026-11-03T21:29:01.328883815Z #27 exporting to image
+> 2026-11-03T21:29:01.328885726Z #27 exporting layers
+> 2026-11-03T21:29:03.501894767Z #27 exporting layers 2.3s done
+> 2026-11-03T21:29:03.656361591Z #27 pushing layers
+> 2026-11-03T21:29:08.456356022Z #27 pushing layers 5.0s done
+> 2026-11-03T21:29:08.619545323Z #27 DONE 7.4s
+> 2026-11-03T21:29:08.61955601Z 
+> 2026-11-03T21:29:08.619558786Z #28 exporting cache to registry
+> 2026-11-03T21:29:08.619561049Z #28 preparing build cache for export
+> 2026-11-03T21:29:29.467739487Z #28 sending cache export
+> 2026-11-03T21:29:39.477396066Z #28 sending cache export 10.0s done
+> 2026-11-03T21:29:39.477414176Z #28 DONE 36.0s
+> 2026-11-03T21:29:40.215562964Z ==> Deploying...
+> 2026-11-03T21:29:40.267555251Z ==> Setting WEB_CONCURRENCY=1 by default, based on available CPUs in the instance
+> 2026-11-03T21:30:10.357859655Z INFO:     Started server process [9]
+> 2026-11-03T21:30:10.357965617Z INFO:     Waiting for application startup.
+> 2026-11-03T21:30:10.461931399Z INFO  [alembic.runtime.migration] Context impl SQLiteImpl.
+> 2026-11-03T21:30:10.462023931Z INFO  [alembic.runtime.migration] Will assume non-transactional DDL.
+> 2026-11-03T21:30:15.056147726Z ▲ Next.js 16.4.4
+> 2026-11-03T21:30:15.056333879Z - Local:         http://localhost:10000
+> 2026-11-03T21:30:15.0563427Z - Network:       http://0.0.0.0:10000
+> 2026-11-03T21:30:15.056674356Z ✓ Ready in 0ms
+> 2026-11-03T21:30:15.059002178Z ✓ Running next.config took 1.2ms
+> 2026-11-03T21:30:21.391210259Z ==> Your service is live 🎉
+> 2026-11-03T21:30:21.605268588Z ==> 
+> 2026-11-03T21:30:21.60958825Z ==> ///////////////////////////////////////////////////////////
+> 2026-11-03T21:30:21.613144544Z ==> 
+> 2026-11-03T21:30:21.617624126Z ==> Available at your primary URL https://finn-c0t0.onrender.com
+> 2026-11-03T21:30:21.624333209Z ==> 
+> 2026-11-03T21:30:21.62752093Z ==> ///////////////////////////////////////////////////////////
+> </pasted_content id="888c">
+> 
+> " .
+
+
+### 🤖 Assistant · 2026-11-04 03:02 IST
+
+The deploy succeeded and the service is live at **https://finn-c0t0.onrender.com**. The log never prints uvicorn's "Application startup complete", so I'll check the live site directly: the pages, and the API through the proxy.
+
+<details><summary>🔧 <code>Bash</code></summary>
+
+```
+U=https://finn-c0t0.onrender.com; for p in / /research /settings; do printf "%-12s %s %ss\n" $p $(curl -s -o /dev/null -w "%{http_code} %{time_total}" --max-time 120 $U$p); done; curl -s --max-time 120 $U/api/v1/alert-rules | head -c 200; echo; curl -s --max-time 180 -w "\n%{http_code} %{time_total}s\n" "$U/api/v1/portfolio" | /e/EnamFinal/.venv/Scripts/python -c "
+import sys,json; raw=sys.stdin.read(); body,code=raw.rsplit('\n',2)[0],raw.rsplit('\n',2)[1]
+d=json.loads(body); print('portfolio',code,d['summary']['companies_tracked'],[(h['symbol'],h['price'],h['market_data']['status'],h['volume_multiple']) for h in d['holdings'][:6]])"
+```
+
+**Result:**
+
+```
+/            200 0.676194s
+/research    200 0.573256s
+/settings    200 0.938317s
+{"items":[{"id":3,"name":"Unusual volume","category":"Price move","enabled":true,"threshold":2.0},{"id":5,"name":"Results","category":"Results","enabled":true,"threshold":null},{"id":6,"name":"Order w
+portfolio 200 0.755227s 18 [('RELIANCE', 1300.0, 'cached', 2.27), ('HDFCBANK', 700.0, 'cached', 1.42), ('ICICIBANK', 1387.4000244140625, 'cached', 1.42), ('TCS', 2501.699951171875, 'cached', 0.59), ('INFY', 1161.0, 'cached', 0.63), ('BHARTIARTL', 1989.9000244140625, 'cached', 2.06)]
+```
+
+</details>
+
+
+### 🤖 Assistant · 2026-11-04 03:02 IST
+
+Pages and the portfolio API work. Next, the digest windows, a results detail, and the Infosys research path:
+
+<details><summary>🔧 <code>Bash</code></summary>
+
+```
+U=https://finn-c0t0.onrender.com; for per in "24%20hours" "7%20days" "30%20days"; do curl -s --max-time 120 "$U/api/v1/digest?period=$per" | /e/EnamFinal/.venv/Scripts/python -c "import sys,json; d=json.load(sys.stdin); print('$per', d['count'], 'material', d['material_count'], [ (i['symbol'], i['type']) for i in d['items'] if not i['routine']][:5])"; done
+curl -s --max-time 60 $U/api/v1/events/filing-nse-106837394 | /e/EnamFinal/.venv/Scripts/python -c "import sys,json; d=json.load(sys.stdin); print(d['company'], d['enrichment']['status'], d['enrichment']['period'], d['summary'][:110])"
+ID=$(curl -s "$U/api/v1/companies?q=INFY" | /e/EnamFinal/.venv/Scripts/python -c "import sys,json; print(next(c['id'] for c in json.load(sys.stdin)['items'] if c['symbol']=='INFY'))"); curl -s --max-time 120 -X POST $U/api/v1/research/guidance-vs-actual -H "Content-Type: application/json" -d "{\"company_id\":$ID}" | /e/EnamFinal/.venv/Scripts/python -c "import sys,json; d=json.load(sys.stdin); print('GvA quarters', [q['period'] for q in d['quarters']])"
+```
+
+**Result:**
+
+```
+24%20hours 9 material 2 [('BHARTIARTL', 'Price move'), ('RELIANCE', 'Price move')]
+7%20days 79 material 21 [('RELIANCE', 'Price move'), ('RELIANCE', 'Results'), ('DIXON', 'Price move'), ('KAYNES', 'Price move'), ('DIXON', 'Results')]
+30%20days 150 material 86 [('RELIANCE', 'Price move'), ('RELIANCE', 'Results'), ('RELIANCE', 'Results'), ('DIXON', 'Price move'), ('ITC', 'Price move')]
+Reliance Industries parsed Q2 FY27 Q2 FY27 consolidated: Revenue ₹332,861 Cr (+28.6% YoY, +6.7% QoQ); PAT ₹29,250 Cr (+32.1% YoY, +27.2% QoQ)
+GvA quarters ['Q2 FY27', 'Q1 FY27', 'Q4 FY26', 'Q3 FY26']
+```
+
+</details>
+
+
+### 🤖 Assistant · 2026-11-04 03:02 IST
+
+Everything works end to end on the live site. One last check is a phone-emulated render of the live Today screen:
+
+<details><summary>🔧 <code>Bash</code></summary>
+
+```
+T=/c/Users/gulsh/AppData/Local/Temp/claude/27ddf3b3aa056d61/c32a5139-202d-4c90-a264-929db2d2ed46/scratchpad/deploytest; sed 's#`http://localhost:7860${p}`#p#' $T/shoot.mjs > $T/shoot_live.mjs; MSYS_NO_PATHCONV=1 node "$(cygpath -w $T/shoot_live.mjs)" "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" "$(cygpath -w $T)\\live_" "https://finn-c0t0.onrender.com/"; ls $T | grep live_
+```
+
+**Result:**
+
+```
+https://finn-c0t0.onrender.com/ { sw: 390, cw: 390, h: 2341 }
+live_m1.png
+live_prof2
+```
+
+</details>
+
+<details><summary>🔧 <code>Read</code></summary>
+
+```
+{
+ "file_path": "C:\\Users\\gulsh\\AppData\\Local\\Temp\\claude\\27ddf3b3aa056d61\\c32a5139-202d-4c90-a264-929db2d2ed46\\scratchpad\\deploytest\\live_m1.png"
+}
+```
+
+</details>
