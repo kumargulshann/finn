@@ -14,7 +14,7 @@ FINN is an AI-powered, mobile-first financial intelligence assistant for Indian 
 | Deliverable | Where |
 | :--- | :--- |
 | 📱 Live prototype (open on a phone) | **https://finn-c0t0.onrender.com** — free tier sleeps when idle; first load can take ~1 min |
-| 🧪 Offline demo | Open (instant, phone-friendly): https://kumargulshann.github.io/finn/demo/finn-demo.html · Download: [finn-demo.html](https://finn-c0t0.onrender.com/finn-demo.html?download=1) (or [from GitHub](https://github.com/kumargulshann/finn/raw/main/demo/finn-demo.html)). One file with a real data snapshot that works offline in any browser. Source: [`demo/finn-demo.html`](demo/finn-demo.html). |
+| 🧪 Offline demo | Open (instant, phone-friendly): https://kumargulshann.github.io/finn/demo/finn-demo.html · Download: [finn-demo.html](https://github.com/kumargulshann/finn/raw/main/demo/finn-demo.html). One file with a real data snapshot that works offline in any browser. Source: [`demo/finn-demo.html`](demo/finn-demo.html). |
 | 💻 Repository | https://github.com/kumargulshann/finn |
 | 🤖 AI build history | [`build-history/`](build-history/README.md) — 6 sessions across Antigravity, Codex and Claude Code, including abandoned attempts |
 | ✉️ Writeup | [`SUBMISSION.md`](SUBMISSION.md) — what I built, trade-offs, what I left out, what's next |

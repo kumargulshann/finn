@@ -10,7 +10,7 @@ Hello ENAM team,
 Here is my submission for the FINN build challenge.
 
 - **Try it on your phone:** https://finn-c0t0.onrender.com (the free host sleeps when idle, so the first load can take up to a minute)
-- **Offline demo (opens instantly on a phone):** https://kumargulshann.github.io/finn/demo/finn-demo.html (download: https://finn-c0t0.onrender.com/finn-demo.html?download=1, or https://github.com/kumargulshann/finn/raw/main/demo/finn-demo.html). It's one HTML file with a real data snapshot that opens offline in any browser.
+- **Offline demo (opens instantly on a phone):** https://kumargulshann.github.io/finn/demo/finn-demo.html (download: https://github.com/kumargulshann/finn/raw/main/demo/finn-demo.html). It's one HTML file with a real data snapshot that opens offline in any browser.
 - **Repository:** https://github.com/kumargulshann/finn
 - **AI build history:** https://github.com/kumargulshann/finn/tree/main/build-history. This holds six sessions across Antigravity, Codex and Claude Code, including the attempts I threw away.
 
