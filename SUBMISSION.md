@@ -1,11 +1,4 @@
-# Covering email
 
-**To:** assessment@enam.com
-**Subject:** ENAM - IIT screening - 2027
-
----
-
-Hello ENAM team,
 
 Here is my submission for the FINN build challenge.
 
